@@ -1,13 +1,15 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import Svg, { Path } from "react-native-svg";
+import Svg, { Path, Circle } from "react-native-svg";
 import * as Haptics from "expo-haptics";
 import { useVerifyOtp, useRequestOtp } from "@workspace/api-client-react";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
+
+const RESEND_COUNTDOWN = 60;
 
 function ShieldCheckIcon({ size = 44, color = "#2AABEE" }: { size?: number; color?: string }) {
   return (
@@ -19,15 +21,72 @@ function ShieldCheckIcon({ size = 44, color = "#2AABEE" }: { size?: number; colo
   );
 }
 
+function CountdownRing({ seconds, total, color }: { seconds: number; total: number; color: string }) {
+  const size = 44;
+  const stroke = 3;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const progress = seconds / total;
+  const strokeDashoffset = circumference * (1 - progress);
+
+  return (
+    <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <Circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        stroke={color}
+        strokeWidth={stroke}
+        opacity={0.15}
+        fill="none"
+      />
+      <Circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        stroke={color}
+        strokeWidth={stroke}
+        fill="none"
+        strokeDasharray={circumference}
+        strokeDashoffset={strokeDashoffset}
+        strokeLinecap="round"
+        rotation="-90"
+        origin={`${size / 2}, ${size / 2}`}
+      />
+    </Svg>
+  );
+}
+
 export default function VerifyScreen() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const { phone } = useLocalSearchParams<{ phone: string }>();
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
+  const [countdown, setCountdown] = useState(RESEND_COUNTDOWN);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { setAuth } = useAuth();
   const verifyOtp = useVerifyOtp();
   const requestOtp = useRequestOtp();
+
+  const startCountdown = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    setCountdown(RESEND_COUNTDOWN);
+    timerRef.current = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current!);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
+  useEffect(() => {
+    startCountdown();
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, []);
 
   const handleVerify = () => {
     if (code.length < 4) { setError("Enter the full verification code"); return; }
@@ -55,17 +114,23 @@ export default function VerifyScreen() {
   };
 
   const handleResend = () => {
-    if (!phone) return;
+    if (!phone || countdown > 0 || requestOtp.isPending) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     requestOtp.mutate(
       { data: { phoneNumber: phone } },
       {
-        onSuccess: () => setError("New code sent!"),
+        onSuccess: () => {
+          setError("New code sent!");
+          setCode("");
+          startCountdown();
+        },
         onError: () => setError("Failed to resend. Try again."),
       }
     );
   };
 
   const isSuccess = error === "New code sent!";
+  const canResend = countdown === 0 && !requestOtp.isPending;
 
   return (
     <View style={[styles.container, { backgroundColor: c.background, paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}>
@@ -119,11 +184,37 @@ export default function VerifyScreen() {
           </LinearGradient>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={handleResend} disabled={requestOtp.isPending} style={{ marginTop: 20 }}>
-          <Text style={[styles.resendText, { color: requestOtp.isPending ? c.mutedForeground : c.primary }]}>
-            {requestOtp.isPending ? "Sending..." : "Resend code"}
-          </Text>
-        </TouchableOpacity>
+        {/* Resend section with countdown */}
+        <View style={styles.resendRow}>
+          {countdown > 0 ? (
+            <>
+              <View style={styles.countdownRing}>
+                <CountdownRing seconds={countdown} total={RESEND_COUNTDOWN} color={c.primary} />
+                <Text style={[styles.countdownNumber, { color: c.primary }]}>{countdown}</Text>
+              </View>
+              <Text style={[styles.resendHint, { color: c.mutedForeground }]}>
+                Resend code in <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold" }}>{countdown}s</Text>
+              </Text>
+            </>
+          ) : (
+            <TouchableOpacity
+              onPress={handleResend}
+              disabled={!canResend}
+              activeOpacity={0.7}
+              style={[styles.resendBtn, { borderColor: c.primary + "40", backgroundColor: c.primary + "12" }]}
+            >
+              {requestOtp.isPending ? (
+                <ActivityIndicator color={c.primary} size="small" />
+              ) : (
+                <Text style={[styles.resendBtnText, { color: c.primary }]}>Resend code</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <Text style={[styles.disclaimer, { color: c.mutedForeground }]}>
+          Didn't get it? Check your WhatsApp messages.
+        </Text>
       </View>
     </View>
   );
@@ -145,5 +236,11 @@ const styles = StyleSheet.create({
   verifyBtn: { width: "100%", borderRadius: 16, overflow: "hidden" },
   verifyBtnGradient: { height: 56, alignItems: "center", justifyContent: "center" },
   verifyBtnText: { color: "#fff", fontSize: 17, fontWeight: "700", fontFamily: "Inter_700Bold" },
-  resendText: { fontSize: 15, fontFamily: "Inter_500Medium" },
+  resendRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 24, marginBottom: 12 },
+  countdownRing: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+  countdownNumber: { position: "absolute", fontSize: 13, fontWeight: "700", fontFamily: "Inter_700Bold" },
+  resendHint: { fontSize: 14, fontFamily: "Inter_400Regular" },
+  resendBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14, borderWidth: 1, minWidth: 140, alignItems: "center", justifyContent: "center" },
+  resendBtnText: { fontSize: 15, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
+  disclaimer: { fontSize: 12, textAlign: "center", fontFamily: "Inter_400Regular", marginTop: 4 },
 });
