@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "web", "bash", "postgresql-16"]
+modules = ["nodejs-20", "web", "bash"]
 
 [deployment]
 router = "application"
@@ -18,21 +18,22 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "artifacts/whatsapp-bot: WhatsApp OTP Bot"
+args = "Start application"
 
 [[workflows.workflow]]
-name = "artifacts/whatsapp-bot: WhatsApp OTP Bot"
+name = "Start application"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/whatsapp-bot run dev"
+args = "pnpm --filter @workspace/api-server run dev"
+waitForPort = 8080
 
 [workflows.workflow.metadata]
 outputType = "console"
 
 [agent]
-stack = "PNPM_WORKSPACE"
+stack = "BEST_EFFORT_FALLBACK"
 expertMode = true
 
 [postMerge]
@@ -42,10 +43,6 @@ timeoutMs = 20000
 [[ports]]
 localPort = 8080
 externalPort = 8080
-
-[[ports]]
-localPort = 8081
-externalPort = 80
 
 [[ports]]
 localPort = 8082
@@ -67,3 +64,6 @@ channel = "stable-25_05"
 [userenv.shared]
 BOT_PHONE_NUMBER = "6285725483343"
 API_BASE_URL = "http://localhost:8080"
+PORT = "8080"
+NODE_ENV = "development"
+LOG_LEVEL = "info"
