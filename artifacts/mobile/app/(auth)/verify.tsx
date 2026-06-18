@@ -1,50 +1,26 @@
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-} from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import Svg, { Path, Circle } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
 import * as Haptics from "expo-haptics";
 import { useVerifyOtp, useRequestOtp } from "@workspace/api-client-react";
 import { useAuth } from "@/context/AuthContext";
-import colors from "@/constants/colors";
+import { useTheme } from "@/context/ThemeContext";
 
 function ShieldCheckIcon({ size = 44, color = "#2AABEE" }: { size?: number; color?: string }) {
-  const s = size;
   return (
-    <Svg width={s} height={s} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.25C17.25 22.15 21 17.25 21 12V7L12 2z"
-        fill={color}
-        opacity={0.15}
-      />
-      <Path
-        d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.25C17.25 22.15 21 17.25 21 12V7L12 2z"
-        stroke={color}
-        strokeWidth={1.5}
-        strokeLinejoin="round"
-        fill="none"
-      />
-      <Path
-        d="M9 12l2 2 4-4"
-        stroke={color}
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.25C17.25 22.15 21 17.25 21 12V7L12 2z" fill={color} opacity={0.15} />
+      <Path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.25C17.25 22.15 21 17.25 21 12V7L12 2z" stroke={color} strokeWidth={1.5} strokeLinejoin="round" fill="none" />
+      <Path d="M9 12l2 2 4-4" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );
 }
 
 export default function VerifyScreen() {
-  const c = colors.dark;
+  const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const { phone } = useLocalSearchParams<{ phone: string }>();
   const [code, setCode] = useState("");
@@ -57,7 +33,6 @@ export default function VerifyScreen() {
     if (code.length < 4) { setError("Enter the full verification code"); return; }
     setError("");
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
     verifyOtp.mutate(
       { data: { phoneNumber: phone!, code } },
       {
@@ -101,11 +76,11 @@ export default function VerifyScreen() {
         <Text style={[styles.backText, { color: c.primary }]}>Back</Text>
       </TouchableOpacity>
 
-      <LinearGradient colors={["#2AABEE18", "transparent"]} style={styles.heroGradient} />
+      <LinearGradient colors={[c.primary + "14", "transparent"]} style={styles.heroGradient} />
 
       <View style={styles.center}>
-        <View style={[styles.iconWrap, { backgroundColor: "#2AABEE18" }]}>
-          <ShieldCheckIcon size={40} color="#2AABEE" />
+        <View style={[styles.iconWrap, { backgroundColor: c.primary + "18" }]}>
+          <ShieldCheckIcon size={40} color={c.primary} />
         </View>
 
         <Text style={[styles.title, { color: c.foreground }]}>Verify number</Text>
@@ -113,7 +88,7 @@ export default function VerifyScreen() {
           Code sent to{"\n"}{phone}
         </Text>
 
-        <View style={[styles.codeContainer, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <View style={[styles.codeContainer, { backgroundColor: c.surface, borderColor: code.length > 0 ? c.primary : c.border }]}>
           <TextInput
             style={[styles.codeInput, { color: c.foreground }]}
             placeholder="- - - - - -"
@@ -128,14 +103,8 @@ export default function VerifyScreen() {
         </View>
 
         {error ? (
-          <View style={[
-            styles.errorBox,
-            {
-              backgroundColor: isSuccess ? "#22C55E18" : "#EF444418",
-              borderColor: isSuccess ? "#22C55E30" : "#EF444430",
-            },
-          ]}>
-            <Text style={[styles.errorText, { color: isSuccess ? "#22C55E" : "#EF4444" }]}>{error}</Text>
+          <View style={[styles.errorBox, { backgroundColor: isSuccess ? c.success + "18" : c.danger + "18", borderColor: isSuccess ? c.success + "30" : c.danger + "30" }]}>
+            <Text style={[styles.errorText, { color: isSuccess ? c.success : c.danger }]}>{error}</Text>
           </View>
         ) : null}
 
@@ -145,8 +114,8 @@ export default function VerifyScreen() {
           disabled={verifyOtp.isPending}
           activeOpacity={0.8}
         >
-          <LinearGradient colors={["#2AABEE", "#1A8CC7"]} style={styles.verifyBtnGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
-            {verifyOtp.isPending ? <ActivityIndicator color="#fff" /> : <Text style={styles.verifyBtnText}>Verify</Text>}
+          <LinearGradient colors={c.primaryGradient} style={styles.verifyBtnGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+            {verifyOtp.isPending ? <ActivityIndicator color="#fff" /> : <Text style={styles.verifyBtnText}>Verify →</Text>}
           </LinearGradient>
         </TouchableOpacity>
 
@@ -168,12 +137,12 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   iconWrap: { width: 80, height: 80, borderRadius: 24, alignItems: "center", justifyContent: "center", marginBottom: 24 },
   title: { fontSize: 28, fontWeight: "800", fontFamily: "Inter_700Bold", marginBottom: 8 },
-  subtitle: { fontSize: 15, textAlign: "center", marginBottom: 32, fontFamily: "Inter_400Regular", lineHeight: 22, color: "#888" },
-  codeContainer: { width: "100%", borderRadius: 14, borderWidth: 1, height: 68, alignItems: "center", justifyContent: "center", marginBottom: 16 },
-  codeInput: { fontSize: 30, fontWeight: "700", fontFamily: "Inter_700Bold", letterSpacing: 10, width: "100%", textAlign: "center" },
-  errorBox: { width: "100%", borderRadius: 10, padding: 12, borderWidth: 1, marginBottom: 16 },
+  subtitle: { fontSize: 15, textAlign: "center", marginBottom: 32, fontFamily: "Inter_400Regular", lineHeight: 22 },
+  codeContainer: { width: "100%", borderRadius: 16, borderWidth: 1.5, height: 68, alignItems: "center", justifyContent: "center", marginBottom: 16 },
+  codeInput: { fontSize: 32, fontWeight: "700", fontFamily: "Inter_700Bold", letterSpacing: 10, width: "100%", textAlign: "center" },
+  errorBox: { width: "100%", borderRadius: 12, padding: 12, borderWidth: 1, marginBottom: 16 },
   errorText: { fontSize: 14, textAlign: "center", fontFamily: "Inter_400Regular" },
-  verifyBtn: { width: "100%", borderRadius: 14, overflow: "hidden" },
+  verifyBtn: { width: "100%", borderRadius: 16, overflow: "hidden" },
   verifyBtnGradient: { height: 56, alignItems: "center", justifyContent: "center" },
   verifyBtnText: { color: "#fff", fontSize: 17, fontWeight: "700", fontFamily: "Inter_700Bold" },
   resendText: { fontSize: 15, fontFamily: "Inter_500Medium" },

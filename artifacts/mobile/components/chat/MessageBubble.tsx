@@ -1,7 +1,8 @@
 import React from "react";
 import { View, Text, StyleSheet, Image, TouchableOpacity } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import colors from "@/constants/colors";
+import { LinearGradient } from "expo-linear-gradient";
+import { useTheme } from "@/context/ThemeContext";
 
 interface MessageBubbleProps {
   message: {
@@ -26,20 +27,21 @@ function formatTime(isoString: string): string {
   return new Date(isoString).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function StatusIcon({ status }: { status?: string | null }) {
-  if (status === "read") return <Text style={styles.statusRead}>✓✓</Text>;
-  if (status === "delivered") return <Text style={styles.statusDelivered}>✓✓</Text>;
-  return <Text style={styles.statusSent}>✓</Text>;
+function StatusIcon({ status, isMe }: { status?: string | null; isMe: boolean }) {
+  if (!isMe) return null;
+  if (status === "read") return <Text style={[styles.statusTick, { color: "#2AABEE" }]}>✓✓</Text>;
+  if (status === "delivered") return <Text style={[styles.statusTick, { color: "rgba(255,255,255,0.7)" }]}>✓✓</Text>;
+  return <Text style={[styles.statusTick, { color: "rgba(255,255,255,0.5)" }]}>✓</Text>;
 }
 
 export default function MessageBubble({ message, isMe, showAvatar = true, onLongPress }: MessageBubbleProps) {
-  const c = colors.dark;
+  const { c } = useTheme();
   const isDeleted = !!message.deletedAt;
 
   return (
     <View style={[styles.row, isMe && styles.rowMe]}>
       {!isMe && showAvatar && (
-        <View style={[styles.avatar, { backgroundColor: "#2AABEE" }]}>
+        <View style={[styles.avatar, { backgroundColor: c.primary }]}>
           {message.sender.avatarUrl ? (
             <Image source={{ uri: message.sender.avatarUrl }} style={styles.avatarImg} />
           ) : (
@@ -55,13 +57,14 @@ export default function MessageBubble({ message, isMe, showAvatar = true, onLong
         style={[
           styles.bubble,
           isMe
-            ? [styles.bubbleMe, { backgroundColor: isDeleted ? c.surface : "#2AABEE" }]
-            : [styles.bubbleThem, { backgroundColor: c.surface }],
+            ? [styles.bubbleMe, { backgroundColor: isDeleted ? c.surface : undefined }]
+            : [styles.bubbleThem, { backgroundColor: c.messageThemBg }],
           isDeleted && styles.bubbleDeleted,
         ]}
       >
+        {/* Reply preview */}
         {message.replyTo && !isDeleted && (
-          <View style={[styles.replyPreview, { borderLeftColor: isMe ? "rgba(255,255,255,0.6)" : c.primary, backgroundColor: isMe ? "rgba(0,0,0,0.15)" : c.secondarySurface }]}>
+          <View style={[styles.replyPreview, { borderLeftColor: isMe ? "rgba(255,255,255,0.6)" : c.primary, backgroundColor: isMe ? "rgba(0,0,0,0.15)" : c.surface }]}>
             <Text style={[styles.replyName, { color: isMe ? "rgba(255,255,255,0.9)" : c.primary }]}>{message.replyTo.senderName}</Text>
             <Text style={[styles.replyContent, { color: isMe ? "rgba(255,255,255,0.7)" : c.mutedForeground }]} numberOfLines={1}>
               {message.replyTo.content ?? (message.replyTo.mediaUrl ? "[media]" : "Message")}
@@ -69,13 +72,9 @@ export default function MessageBubble({ message, isMe, showAvatar = true, onLong
           </View>
         )}
 
-        {isDeleted ? (
-          <View style={styles.deletedRow}>
-            <Feather name="slash" size={13} color={c.mutedForeground} />
-            <Text style={[styles.deletedText, { color: c.mutedForeground }]}>Message deleted</Text>
-          </View>
-        ) : (
-          <>
+        {/* Gradient bubble for sent messages */}
+        {isMe && !isDeleted ? (
+          <LinearGradient colors={c.messageMeGradient} style={styles.bubbleMeGrad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
             {message.type === "image" && message.mediaUrl ? (
               <Image source={{ uri: message.mediaUrl }} style={styles.mediaImage} resizeMode="cover" />
             ) : message.type === "video" && message.mediaUrl ? (
@@ -84,35 +83,59 @@ export default function MessageBubble({ message, isMe, showAvatar = true, onLong
               </View>
             ) : message.type === "audio" || message.type === "voice" ? (
               <View style={styles.audioRow}>
-                <Feather name="mic" size={16} color={isMe ? "#fff" : c.primary} />
-                <View style={[styles.audioWave, { backgroundColor: isMe ? "rgba(255,255,255,0.3)" : c.border }]} />
+                <Feather name="mic" size={16} color="#fff" />
+                <View style={[styles.audioWave, { backgroundColor: "rgba(255,255,255,0.3)" }]} />
               </View>
             ) : null}
-
             {message.content ? (
-              <Text style={[styles.content, { color: isMe ? "#fff" : c.foreground }]}>
-                {message.content}
-              </Text>
+              <Text style={[styles.content, { color: "#fff" }]}>{message.content}</Text>
             ) : null}
+            <View style={styles.meta}>
+              {message.editedAt && <Text style={[styles.edited, { color: "rgba(255,255,255,0.6)" }]}>edited </Text>}
+              <Text style={[styles.time, { color: "rgba(255,255,255,0.6)" }]}>{formatTime(message.createdAt)}</Text>
+              <StatusIcon status={message.status} isMe={isMe} />
+            </View>
+          </LinearGradient>
+        ) : (
+          <>
+            {isDeleted ? (
+              <View style={styles.deletedRow}>
+                <Feather name="slash" size={13} color={c.mutedForeground} />
+                <Text style={[styles.deletedText, { color: c.mutedForeground }]}>Message deleted</Text>
+              </View>
+            ) : (
+              <>
+                {message.type === "image" && message.mediaUrl ? (
+                  <Image source={{ uri: message.mediaUrl }} style={styles.mediaImage} resizeMode="cover" />
+                ) : message.type === "video" && message.mediaUrl ? (
+                  <View style={[styles.mediaVideoPlaceholder, { backgroundColor: "#000" }]}>
+                    <Feather name="play-circle" size={40} color="#fff" />
+                  </View>
+                ) : message.type === "audio" || message.type === "voice" ? (
+                  <View style={styles.audioRow}>
+                    <Feather name="mic" size={16} color={c.primary} />
+                    <View style={[styles.audioWave, { backgroundColor: c.border }]} />
+                  </View>
+                ) : null}
+                {message.content ? (
+                  <Text style={[styles.content, { color: c.foreground }]}>{message.content}</Text>
+                ) : null}
+                {!isDeleted && (
+                  <View style={styles.meta}>
+                    {message.editedAt && <Text style={[styles.edited, { color: c.mutedForeground }]}>edited </Text>}
+                    <Text style={[styles.time, { color: c.mutedForeground }]}>{formatTime(message.createdAt)}</Text>
+                  </View>
+                )}
+              </>
+            )}
           </>
         )}
 
-        {!isDeleted && (
-          <View style={styles.meta}>
-            {message.editedAt && (
-              <Text style={[styles.edited, { color: isMe ? "rgba(255,255,255,0.6)" : c.mutedForeground }]}>edited </Text>
-            )}
-            <Text style={[styles.time, { color: isMe ? "rgba(255,255,255,0.6)" : c.mutedForeground }]}>
-              {formatTime(message.createdAt)}
-            </Text>
-            {isMe && <StatusIcon status={message.status} />}
-          </View>
-        )}
-
+        {/* Reactions */}
         {!isDeleted && message.reactions.length > 0 && (
           <View style={styles.reactions}>
             {message.reactions.map((r) => (
-              <View key={r.emoji} style={[styles.reaction, { backgroundColor: isMe ? "rgba(0,0,0,0.2)" : c.secondarySurface }]}>
+              <View key={r.emoji} style={[styles.reaction, { backgroundColor: isMe ? "rgba(0,0,0,0.2)" : c.surface }]}>
                 <Text style={styles.reactionEmoji}>{r.emoji}</Text>
                 <Text style={[styles.reactionCount, { color: isMe ? "rgba(255,255,255,0.8)" : c.mutedForeground }]}>{r.count}</Text>
               </View>
@@ -130,26 +153,25 @@ const styles = StyleSheet.create({
   avatar: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", marginRight: 6, overflow: "hidden" },
   avatarImg: { width: 32, height: 32, borderRadius: 16 },
   avatarText: { color: "#fff", fontSize: 13, fontWeight: "700" },
-  bubble: { maxWidth: "75%", borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8, marginHorizontal: 4 },
+  bubble: { maxWidth: "75%", borderRadius: 18, marginHorizontal: 4, overflow: "hidden" },
   bubbleMe: { borderBottomRightRadius: 4 },
-  bubbleThem: { borderBottomLeftRadius: 4 },
-  bubbleDeleted: { opacity: 0.6 },
+  bubbleThem: { borderBottomLeftRadius: 4, paddingHorizontal: 12, paddingVertical: 8 },
+  bubbleMeGrad: { paddingHorizontal: 12, paddingVertical: 8 },
+  bubbleDeleted: { opacity: 0.6, paddingHorizontal: 12, paddingVertical: 8 },
   deletedRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 2 },
   deletedText: { fontSize: 14, fontStyle: "italic", fontFamily: "Inter_400Regular" },
   replyPreview: { borderLeftWidth: 3, paddingLeft: 8, marginBottom: 6, borderRadius: 4, paddingVertical: 4, paddingRight: 4 },
   replyName: { fontSize: 12, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
   replyContent: { fontSize: 12, fontFamily: "Inter_400Regular" },
-  mediaImage: { width: 220, height: 160, borderRadius: 12, marginBottom: 4 },
-  mediaVideoPlaceholder: { width: 220, height: 160, borderRadius: 12, marginBottom: 4, alignItems: "center", justifyContent: "center" },
-  audioRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 },
+  mediaImage: { width: 220, height: 160, borderRadius: 10, marginBottom: 4 },
+  mediaVideoPlaceholder: { width: 220, height: 160, borderRadius: 10, marginBottom: 4, alignItems: "center", justifyContent: "center" },
+  audioRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4, minWidth: 120 },
   audioWave: { flex: 1, height: 3, borderRadius: 2 },
   content: { fontSize: 15, lineHeight: 20, fontFamily: "Inter_400Regular" },
   meta: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center", marginTop: 4, gap: 2 },
   edited: { fontSize: 11, fontFamily: "Inter_400Regular" },
   time: { fontSize: 11, fontFamily: "Inter_400Regular" },
-  statusRead: { fontSize: 11, color: "#2AABEE" },
-  statusDelivered: { fontSize: 11, color: "rgba(255,255,255,0.7)" },
-  statusSent: { fontSize: 11, color: "rgba(255,255,255,0.5)" },
+  statusTick: { fontSize: 11 },
   reactions: { flexDirection: "row", flexWrap: "wrap", marginTop: 4, gap: 4 },
   reaction: { flexDirection: "row", alignItems: "center", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 12, gap: 2 },
   reactionEmoji: { fontSize: 13 },
