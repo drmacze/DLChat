@@ -1,0 +1,171 @@
+import { Router } from "express";
+import { z } from "zod/v4";
+import { db } from "@workspace/db";
+import {
+  messages,
+  conversationMembers,
+  users,
+  messageReactions,
+  messageStatus,
+  conversations,
+} from "@workspace/db";
+import { eq, and, desc, isNull, lt, sql } from "drizzle-orm";
+import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
+import { logger } from "../lib/logger.js";
+import { broadcastMessage } from "../socket/index.js";
+
+const router = Router({ mergeParams: true });
+
+function userPublic(u: typeof users.$inferSelect) {
+  return {
+    id: u.id,
+    username: u.username,
+    displayName: u.displayName,
+    bio: u.bio,
+    avatarUrl: u.avatarUrl,
+    isOnline: u.isOnline,
+    lastSeenAt: u.lastSeenAt?.toISOString() ?? null,
+    role: u.role,
+  };
+}
+
+async function isMember(conversationId: string, userId: string) {
+  const [m] = await db
+    .select()
+    .from(conversationMembers)
+    .where(and(eq(conversationMembers.conversationId, conversationId), eq(conversationMembers.userId, userId)))
+    .limit(1);
+  return !!m;
+}
+
+async function buildMessageOutput(msg: typeof messages.$inferSelect, userId: string) {
+  const [sender] = await db.select().from(users).where(eq(users.id, msg.senderId!)).limit(1);
+  const reactions = await db
+    .select()
+    .from(messageReactions)
+    .where(eq(messageReactions.messageId, msg.id));
+
+  const reactionMap: Record<string, { emoji: string; count: number; users: string[] }> = {};
+  for (const r of reactions) {
+    if (!reactionMap[r.emoji]) reactionMap[r.emoji] = { emoji: r.emoji, count: 0, users: [] };
+    reactionMap[r.emoji].count++;
+    reactionMap[r.emoji].users.push(r.userId);
+  }
+
+  let replyTo = null;
+  if (msg.replyToMessageId) {
+    const [replyMsg] = await db.select({ msg: messages, u: users })
+      .from(messages)
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(eq(messages.id, msg.replyToMessageId))
+      .limit(1);
+    if (replyMsg) {
+      replyTo = {
+        id: replyMsg.msg.id,
+        content: replyMsg.msg.content,
+        type: replyMsg.msg.type,
+        senderName: replyMsg.u.displayName,
+        createdAt: replyMsg.msg.createdAt.toISOString(),
+      };
+    }
+  }
+
+  const [status] = await db.select().from(messageStatus)
+    .where(and(eq(messageStatus.messageId, msg.id), eq(messageStatus.userId, userId)))
+    .limit(1);
+
+  return {
+    id: msg.id,
+    conversationId: msg.conversationId,
+    senderId: msg.senderId,
+    type: msg.type,
+    content: msg.content,
+    mediaUrl: msg.mediaUrl,
+    replyToMessageId: msg.replyToMessageId,
+    replyTo,
+    editedAt: msg.editedAt?.toISOString() ?? null,
+    deletedAt: msg.deletedAt?.toISOString() ?? null,
+    createdAt: msg.createdAt.toISOString(),
+    sender: sender ? userPublic(sender) : { id: "", displayName: "Deleted User", isOnline: false, role: "user" as const },
+    reactions: Object.values(reactionMap),
+    status: status?.status ?? null,
+  };
+}
+
+router.get("/:conversationId/messages", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const convId = String(req.params.conversationId);
+    if (!await isMember(convId, req.userId!)) {
+      res.status(403).json({ error: "Not a member" }); return;
+    }
+    const { before, limit = "50" } = z
+      .object({ before: z.string().optional(), limit: z.string().optional() })
+      .parse(req.query);
+
+    const lim = Math.min(parseInt(limit), 100);
+
+    let whereClause = and(eq(messages.conversationId, convId), isNull(messages.deletedAt));
+
+    if (before) {
+      const [refMsg] = await db.select().from(messages).where(eq(messages.id, before)).limit(1);
+      if (refMsg) {
+        whereClause = and(eq(messages.conversationId, convId), isNull(messages.deletedAt), lt(messages.createdAt, refMsg.createdAt));
+      }
+    }
+
+    const msgs = await db
+      .select()
+      .from(messages)
+      .where(whereClause)
+      .orderBy(desc(messages.createdAt))
+      .limit(lim + 1);
+    const hasMore = msgs.length > lim;
+    const result = await Promise.all(msgs.slice(0, lim).map((m) => buildMessageOutput(m, req.userId!)));
+
+    res.json({ messages: result.reverse(), hasMore });
+  } catch (err) {
+    logger.error({ err }, "Get messages error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+router.post("/:conversationId/messages", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const convId = String(req.params.conversationId);
+    if (!await isMember(convId, req.userId!)) {
+      res.status(403).json({ error: "Not a member" }); return;
+    }
+    const body = z
+      .object({
+        content: z.string().optional(),
+        type: z.enum(["text", "image", "video", "file", "audio", "voice"]).default("text"),
+        mediaUrl: z.string().optional(),
+        replyToMessageId: z.string().uuid().optional(),
+      })
+      .parse(req.body);
+
+    if (!body.content && !body.mediaUrl) {
+      res.status(400).json({ error: "Message must have content or media" }); return;
+    }
+
+    const [msg] = await db.insert(messages).values({
+      conversationId: convId,
+      senderId: req.userId!,
+      type: body.type,
+      content: body.content,
+      mediaUrl: body.mediaUrl,
+      replyToMessageId: body.replyToMessageId,
+    }).returning();
+
+    await db.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, convId));
+
+    const output = await buildMessageOutput(msg, req.userId!);
+    broadcastMessage(convId, output);
+    res.json(output);
+  } catch (err) {
+    logger.error({ err }, "Send message error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+export default router;

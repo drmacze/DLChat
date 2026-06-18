@@ -1,0 +1,92 @@
+{
+  "expo": {
+    "name": "Dlavie Chat",
+    "slug": "mobile",
+    "owner": "drmacze",
+    "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "dlaviechat",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0E1621"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.dlavie.chat",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Dlavie Chat needs camera access to take photos for messages and stories.",
+        "NSPhotoLibraryUsageDescription": "Dlavie Chat needs photo library access to share photos in messages.",
+        "NSMicrophoneUsageDescription": "Dlavie Chat needs microphone access for voice messages.",
+        "NSLocationWhenInUseUsageDescription": "Dlavie Chat needs location access to share your location in chats."
+      }
+    },
+    "android": {
+      "package": "com.dlavie.chat",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#0E1621"
+      },
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECORD_AUDIO",
+        "ACCESS_FINE_LOCATION",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "INTERNET"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/images/icon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://replit.com/"
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#2AABEE",
+          "sounds": []
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Dlavie Chat needs access to your photos to share images.",
+          "cameraPermission": "Dlavie Chat needs camera access to take photos."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Dlavie Chat needs location access to share your location."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "YOUR_EAS_PROJECT_ID"
+      }
+    }
+  }
+}

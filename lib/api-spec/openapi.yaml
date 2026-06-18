@@ -1,0 +1,2031 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: Dlavie Chat API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+  - name: auth
+  - name: users
+  - name: contacts
+  - name: conversations
+  - name: messages
+  - name: posts
+  - name: stories
+  - name: notifications
+  - name: upload
+  - name: reports
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  # AUTH
+  /auth/request-otp:
+    post:
+      operationId: requestOtp
+      tags: [auth]
+      summary: Request OTP for phone number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestOtpBody"
+      responses:
+        "200":
+          description: OTP sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestOtpResponse"
+        "400":
+          description: Invalid phone number
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: OTP provider not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/verify-otp:
+    post:
+      operationId: verifyOtp
+      tags: [auth]
+      summary: Verify OTP and get auth token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyOtpBody"
+      responses:
+        "200":
+          description: Verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: OTP invalid or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout current session
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /auth/sessions:
+    get:
+      operationId: getSessions
+      tags: [auth]
+      summary: Get all active sessions
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Sessions list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Session"
+                required: [sessions]
+
+  /auth/sessions/{sessionId}:
+    delete:
+      operationId: revokeSession
+      tags: [auth]
+      summary: Revoke a session
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  # USERS
+  /users/search:
+    get:
+      operationId: searchUsers
+      tags: [users]
+      summary: Search users by username or phone
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UserPublic"
+                required: [users]
+
+  /users/me:
+    patch:
+      operationId: updateMe
+      tags: [users]
+      summary: Update current user profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileBody"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+
+  /users/{userId}:
+    get:
+      operationId: getUserById
+      tags: [users]
+      summary: Get user profile by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPublic"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # CONTACTS
+  /contacts:
+    get:
+      operationId: getContacts
+      tags: [contacts]
+      summary: Get contact list
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Contacts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contacts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ContactWithUser"
+                required: [contacts]
+    post:
+      operationId: addContact
+      tags: [contacts]
+      summary: Add contact
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddContactBody"
+      responses:
+        "200":
+          description: Contact added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactWithUser"
+
+  /contacts/{contactId}:
+    delete:
+      operationId: removeContact
+      tags: [contacts]
+      summary: Remove contact
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contactId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /contacts/block:
+    post:
+      operationId: blockUser
+      tags: [contacts]
+      summary: Block a user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: string
+              required: [userId]
+      responses:
+        "200":
+          description: Blocked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /contacts/blocked:
+    get:
+      operationId: getBlockedUsers
+      tags: [contacts]
+      summary: Get blocked users
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Blocked users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  blocked:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UserPublic"
+                required: [blocked]
+
+  /contacts/block/{userId}:
+    delete:
+      operationId: unblockUser
+      tags: [contacts]
+      summary: Unblock a user
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Unblocked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  # CONVERSATIONS
+  /conversations:
+    get:
+      operationId: getConversations
+      tags: [conversations]
+      summary: Get all conversations for current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Conversations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ConversationSummary"
+                required: [conversations]
+
+  /conversations/direct:
+    post:
+      operationId: createDirectConversation
+      tags: [conversations]
+      summary: Create or get direct conversation
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                targetUserId:
+                  type: string
+              required: [targetUserId]
+      responses:
+        "200":
+          description: Conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetail"
+
+  /conversations/group:
+    post:
+      operationId: createGroupConversation
+      tags: [conversations]
+      summary: Create group conversation
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGroupBody"
+      responses:
+        "200":
+          description: Created group
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetail"
+
+  /conversations/channel:
+    post:
+      operationId: createChannel
+      tags: [conversations]
+      summary: Create channel
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChannelBody"
+      responses:
+        "200":
+          description: Created channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetail"
+
+  /conversations/{conversationId}:
+    get:
+      operationId: getConversation
+      tags: [conversations]
+      summary: Get conversation detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetail"
+    patch:
+      operationId: updateConversation
+      tags: [conversations]
+      summary: Update conversation (group/channel info)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateConversationBody"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetail"
+
+  /conversations/{conversationId}/members:
+    post:
+      operationId: addConversationMember
+      tags: [conversations]
+      summary: Add member to group
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: string
+              required: [userId]
+      responses:
+        "200":
+          description: Member added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /conversations/{conversationId}/members/{userId}:
+    delete:
+      operationId: removeConversationMember
+      tags: [conversations]
+      summary: Remove member from group
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Member removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /conversations/{conversationId}/leave:
+    post:
+      operationId: leaveConversation
+      tags: [conversations]
+      summary: Leave group/channel
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Left
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  # MESSAGES
+  /conversations/{conversationId}/messages:
+    get:
+      operationId: getMessages
+      tags: [messages]
+      summary: Get paginated messages
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: before
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Message"
+                  hasMore:
+                    type: boolean
+                required: [messages, hasMore]
+    post:
+      operationId: sendMessage
+      tags: [messages]
+      summary: Send a message
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageBody"
+      responses:
+        "200":
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+
+  /messages/{messageId}:
+    patch:
+      operationId: editMessage
+      tags: [messages]
+      summary: Edit a message
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+              required: [content]
+      responses:
+        "200":
+          description: Edited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+    delete:
+      operationId: deleteMessage
+      tags: [messages]
+      summary: Delete a message
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /messages/{messageId}/read:
+    post:
+      operationId: markMessageRead
+      tags: [messages]
+      summary: Mark message as read
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Marked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /messages/{messageId}/reactions:
+    post:
+      operationId: addReaction
+      tags: [messages]
+      summary: Add reaction to message
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                emoji:
+                  type: string
+              required: [emoji]
+      responses:
+        "200":
+          description: Reaction added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+    delete:
+      operationId: removeReaction
+      tags: [messages]
+      summary: Remove reaction from message
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                emoji:
+                  type: string
+              required: [emoji]
+      responses:
+        "200":
+          description: Reaction removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  # POSTS
+  /posts/feed:
+    get:
+      operationId: getFeed
+      tags: [posts]
+      summary: Get social feed
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Feed posts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  posts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Post"
+                  hasMore:
+                    type: boolean
+                required: [posts, hasMore]
+
+  /posts:
+    post:
+      operationId: createPost
+      tags: [posts]
+      summary: Create a post
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePostBody"
+      responses:
+        "200":
+          description: Post created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+
+  /posts/user/{userId}:
+    get:
+      operationId: getUserPosts
+      tags: [posts]
+      summary: Get posts by user
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        "200":
+          description: User posts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  posts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Post"
+                  hasMore:
+                    type: boolean
+                required: [posts, hasMore]
+
+  /posts/{postId}:
+    delete:
+      operationId: deletePost
+      tags: [posts]
+      summary: Delete a post
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /posts/{postId}/like:
+    post:
+      operationId: likePost
+      tags: [posts]
+      summary: Like a post
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Liked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+    delete:
+      operationId: unlikePost
+      tags: [posts]
+      summary: Unlike a post
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Unliked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /posts/{postId}/comments:
+    post:
+      operationId: addComment
+      tags: [posts]
+      summary: Add comment to post
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+              required: [content]
+      responses:
+        "200":
+          description: Comment added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+
+  /posts/{postId}/comments/{commentId}:
+    delete:
+      operationId: deleteComment
+      tags: [posts]
+      summary: Delete comment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  # STORIES
+  /stories:
+    get:
+      operationId: getStories
+      tags: [stories]
+      summary: Get active stories from contacts
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Stories grouped by user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stories:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UserStories"
+                required: [stories]
+    post:
+      operationId: createStory
+      tags: [stories]
+      summary: Create a story
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStoryBody"
+      responses:
+        "200":
+          description: Story created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Story"
+
+  /stories/{storyId}:
+    get:
+      operationId: getStory
+      tags: [stories]
+      summary: Get story by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: storyId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Story
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Story"
+    delete:
+      operationId: deleteStory
+      tags: [stories]
+      summary: Delete story
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: storyId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /stories/{storyId}/view:
+    post:
+      operationId: viewStory
+      tags: [stories]
+      summary: Mark story as viewed
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: storyId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Viewed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  # NOTIFICATIONS
+  /notifications:
+    get:
+      operationId: getNotifications
+      tags: [notifications]
+      summary: Get notifications
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        "200":
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Notification"
+                  unreadCount:
+                    type: integer
+                required: [notifications, unreadCount]
+
+  /notifications/{notificationId}/read:
+    patch:
+      operationId: markNotificationRead
+      tags: [notifications]
+      summary: Mark notification as read
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Marked read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /notifications/read-all:
+    patch:
+      operationId: markAllNotificationsRead
+      tags: [notifications]
+      summary: Mark all notifications as read
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: All marked read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  # UPLOAD
+  /upload/avatar:
+    post:
+      operationId: uploadAvatar
+      tags: [upload]
+      summary: Upload user avatar
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        "200":
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+        "503":
+          description: Storage not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /upload/message-media:
+    post:
+      operationId: uploadMessageMedia
+      tags: [upload]
+      summary: Upload media for a message
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        "200":
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+
+  /upload/post-media:
+    post:
+      operationId: uploadPostMedia
+      tags: [upload]
+      summary: Upload media for a post
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        "200":
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+
+  /upload/story-media:
+    post:
+      operationId: uploadStoryMedia
+      tags: [upload]
+      summary: Upload media for a story
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        "200":
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+
+  /upload/voice:
+    post:
+      operationId: uploadVoice
+      tags: [upload]
+      summary: Upload voice note
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        "200":
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+
+  # REPORTS
+  /reports:
+    post:
+      operationId: createReport
+      tags: [reports]
+      summary: Submit a report
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReportBody"
+      responses:
+        "200":
+          description: Report submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /admin/reports:
+    get:
+      operationId: getAdminReports
+      tags: [reports]
+      summary: Get all reports (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, resolved, rejected]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        "200":
+          description: Reports list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reports:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Report"
+                required: [reports]
+
+  /admin/reports/{reportId}:
+    get:
+      operationId: getAdminReport
+      tags: [reports]
+      summary: Get report detail (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+    patch:
+      operationId: updateReport
+      tags: [reports]
+      summary: Resolve or reject report (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [resolved, rejected]
+              required: [status]
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /admin/content/{type}/{id}:
+    delete:
+      operationId: deleteContent
+      tags: [reports]
+      summary: Delete reported content (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [post, message, story]
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required: [status]
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+      required: [error]
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+      required: [success]
+
+    RequestOtpBody:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+      required: [phoneNumber]
+
+    RequestOtpResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        phoneNumber:
+          type: string
+      required: [message, phoneNumber]
+
+    VerifyOtpBody:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+        code:
+          type: string
+      required: [phoneNumber, code]
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/UserProfile"
+        isNewUser:
+          type: boolean
+      required: [token, user, isNewUser]
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        phoneNumber:
+          type: string
+        username:
+          type: string
+          nullable: true
+        displayName:
+          type: string
+        bio:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        statusText:
+          type: string
+          nullable: true
+        role:
+          type: string
+          enum: [user, moderator, admin]
+        isOnline:
+          type: boolean
+        lastSeenAt:
+          type: string
+          nullable: true
+        privacyLastSeen:
+          type: string
+          enum: [everyone, contacts, nobody]
+        privacyProfilePhoto:
+          type: string
+          enum: [everyone, contacts, nobody]
+        privacyReadReceipts:
+          type: boolean
+        createdAt:
+          type: string
+      required: [id, phoneNumber, displayName, role, isOnline, privacyLastSeen, privacyProfilePhoto, privacyReadReceipts, createdAt]
+
+    UserPublic:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+          nullable: true
+        displayName:
+          type: string
+        bio:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        isOnline:
+          type: boolean
+        lastSeenAt:
+          type: string
+          nullable: true
+        role:
+          type: string
+          enum: [user, moderator, admin]
+      required: [id, displayName, isOnline, role]
+
+    UpdateProfileBody:
+      type: object
+      properties:
+        displayName:
+          type: string
+        username:
+          type: string
+        bio:
+          type: string
+        statusText:
+          type: string
+        avatarUrl:
+          type: string
+        privacyLastSeen:
+          type: string
+          enum: [everyone, contacts, nobody]
+        privacyProfilePhoto:
+          type: string
+          enum: [everyone, contacts, nobody]
+        privacyReadReceipts:
+          type: boolean
+
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+        deviceName:
+          type: string
+          nullable: true
+        ipAddress:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        lastActiveAt:
+          type: string
+        isCurrent:
+          type: boolean
+      required: [id, createdAt, lastActiveAt, isCurrent]
+
+    ContactWithUser:
+      type: object
+      properties:
+        id:
+          type: string
+        customName:
+          type: string
+          nullable: true
+        isFavorite:
+          type: boolean
+        createdAt:
+          type: string
+        user:
+          $ref: "#/components/schemas/UserPublic"
+      required: [id, isFavorite, createdAt, user]
+
+    AddContactBody:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+        username:
+          type: string
+        customName:
+          type: string
+      anyOf:
+        - required: [phoneNumber]
+        - required: [username]
+
+    ConversationSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [direct, group, channel]
+        title:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        lastMessage:
+          $ref: "#/components/schemas/MessagePreview"
+          nullable: true
+        unreadCount:
+          type: integer
+        isPinned:
+          type: boolean
+        isMuted:
+          type: boolean
+        otherUser:
+          $ref: "#/components/schemas/UserPublic"
+          nullable: true
+        memberCount:
+          type: integer
+          nullable: true
+        updatedAt:
+          type: string
+      required: [id, type, unreadCount, isPinned, isMuted, updatedAt]
+
+    MessagePreview:
+      type: object
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+          nullable: true
+        type:
+          type: string
+        senderName:
+          type: string
+        createdAt:
+          type: string
+      required: [id, type, senderName, createdAt]
+
+    ConversationDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [direct, group, channel]
+        title:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        isPublic:
+          type: boolean
+        createdAt:
+          type: string
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConversationMember"
+        myRole:
+          type: string
+          enum: [owner, admin, member, subscriber]
+      required: [id, type, isPublic, createdAt, members, myRole]
+
+    ConversationMember:
+      type: object
+      properties:
+        userId:
+          type: string
+        role:
+          type: string
+          enum: [owner, admin, member, subscriber]
+        joinedAt:
+          type: string
+        user:
+          $ref: "#/components/schemas/UserPublic"
+      required: [userId, role, joinedAt, user]
+
+    CreateGroupBody:
+      type: object
+      properties:
+        title:
+          type: string
+        memberIds:
+          type: array
+          items:
+            type: string
+        avatarUrl:
+          type: string
+      required: [title, memberIds]
+
+    CreateChannelBody:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        isPublic:
+          type: boolean
+        avatarUrl:
+          type: string
+      required: [title]
+
+    UpdateConversationBody:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        avatarUrl:
+          type: string
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+        conversationId:
+          type: string
+        senderId:
+          type: string
+        type:
+          type: string
+          enum: [text, image, video, file, audio, voice, system]
+        content:
+          type: string
+          nullable: true
+        mediaUrl:
+          type: string
+          nullable: true
+        replyToMessageId:
+          type: string
+          nullable: true
+        replyTo:
+          $ref: "#/components/schemas/MessagePreview"
+          nullable: true
+        editedAt:
+          type: string
+          nullable: true
+        deletedAt:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        sender:
+          $ref: "#/components/schemas/UserPublic"
+        reactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Reaction"
+        status:
+          type: string
+          enum: [sent, delivered, read]
+          nullable: true
+      required: [id, conversationId, senderId, type, createdAt, sender, reactions]
+
+    SendMessageBody:
+      type: object
+      properties:
+        content:
+          type: string
+        type:
+          type: string
+          enum: [text, image, video, file, audio, voice]
+          default: text
+        mediaUrl:
+          type: string
+        replyToMessageId:
+          type: string
+
+    Reaction:
+      type: object
+      properties:
+        emoji:
+          type: string
+        count:
+          type: integer
+        users:
+          type: array
+          items:
+            type: string
+      required: [emoji, count, users]
+
+    Post:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        content:
+          type: string
+          nullable: true
+        mediaUrl:
+          type: string
+          nullable: true
+        visibility:
+          type: string
+          enum: [public, contacts, private]
+        likesCount:
+          type: integer
+        commentsCount:
+          type: integer
+        isLikedByMe:
+          type: boolean
+        createdAt:
+          type: string
+        author:
+          $ref: "#/components/schemas/UserPublic"
+        comments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Comment"
+      required: [id, userId, visibility, likesCount, commentsCount, isLikedByMe, createdAt, author, comments]
+
+    CreatePostBody:
+      type: object
+      properties:
+        content:
+          type: string
+        mediaUrl:
+          type: string
+        visibility:
+          type: string
+          enum: [public, contacts, private]
+          default: public
+
+    Comment:
+      type: object
+      properties:
+        id:
+          type: string
+        postId:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+        author:
+          $ref: "#/components/schemas/UserPublic"
+      required: [id, postId, content, createdAt, author]
+
+    Story:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        type:
+          type: string
+          enum: [text, image, video]
+        content:
+          type: string
+          nullable: true
+        mediaUrl:
+          type: string
+          nullable: true
+        backgroundColor:
+          type: string
+          nullable: true
+        expiresAt:
+          type: string
+        createdAt:
+          type: string
+        viewCount:
+          type: integer
+        isViewedByMe:
+          type: boolean
+        author:
+          $ref: "#/components/schemas/UserPublic"
+      required: [id, userId, type, expiresAt, createdAt, viewCount, isViewedByMe, author]
+
+    UserStories:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/UserPublic"
+        stories:
+          type: array
+          items:
+            $ref: "#/components/schemas/Story"
+        hasUnviewed:
+          type: boolean
+      required: [user, stories, hasUnviewed]
+
+    CreateStoryBody:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [text, image, video]
+        content:
+          type: string
+        mediaUrl:
+          type: string
+        backgroundColor:
+          type: string
+      required: [type]
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+        relatedType:
+          type: string
+          nullable: true
+        relatedId:
+          type: string
+          nullable: true
+        isRead:
+          type: boolean
+        createdAt:
+          type: string
+      required: [id, type, title, body, isRead, createdAt]
+
+    UploadResponse:
+      type: object
+      properties:
+        url:
+          type: string
+        fileName:
+          type: string
+        fileSize:
+          type: integer
+        mimeType:
+          type: string
+      required: [url, fileName, fileSize, mimeType]
+
+    CreateReportBody:
+      type: object
+      properties:
+        targetType:
+          type: string
+          enum: [user, post, message, story]
+        targetId:
+          type: string
+        reason:
+          type: string
+        details:
+          type: string
+      required: [targetType, targetId, reason]
+
+    Report:
+      type: object
+      properties:
+        id:
+          type: string
+        reporterId:
+          type: string
+        targetType:
+          type: string
+          enum: [user, post, message, story]
+        targetId:
+          type: string
+        reason:
+          type: string
+        details:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [pending, resolved, rejected]
+        createdAt:
+          type: string
+        resolvedAt:
+          type: string
+          nullable: true
+      required: [id, reporterId, targetType, targetId, reason, status, createdAt]
