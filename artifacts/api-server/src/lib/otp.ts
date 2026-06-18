@@ -1,64 +1,56 @@
-import { db } from "@workspace/db";
-import { otpCodes } from "@workspace/db";
-import { eq, and, gt } from "drizzle-orm";
+import twilio from "twilio";
 import { logger } from "./logger.js";
 
-function generateOtp(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
+const ACCOUNT_SID = process.env["TWILIO_ACCOUNT_SID"] ?? "";
+const AUTH_TOKEN  = process.env["TWILIO_AUTH_TOKEN"] ?? "";
+const VERIFY_SID  = process.env["TWILIO_VERIFY_SERVICE_SID"] ?? "";
+
+const client = ACCOUNT_SID && AUTH_TOKEN ? twilio(ACCOUNT_SID, AUTH_TOKEN) : null;
 
 export async function sendOTP(phoneNumber: string): Promise<void> {
-  const code = generateOtp();
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-  // Delete any existing OTP for this phone (only one active OTP at a time)
-  await db.delete(otpCodes).where(eq(otpCodes.phoneNumber, phoneNumber));
-
-  // Store in database — bot will pick it up
-  await db.insert(otpCodes).values({ phoneNumber, code, expiresAt });
-
-  logger.info({ phoneNumber }, "OTP stored in DB — waiting for bot to deliver");
-
-  // Dev fallback: also log to console
-  if (process.env.NODE_ENV === "development") {
+  if (!client || !VERIFY_SID) {
+    // Dev fallback when Twilio not configured
+    const code = String(Math.floor(100000 + Math.random() * 900000));
     console.log(`\n[DEV OTP] Phone: ${phoneNumber}  Code: ${code}\n`);
+    logger.warn({ phoneNumber }, "Twilio not configured — OTP only logged to console");
+    return;
   }
+
+  await client.verify.v2
+    .services(VERIFY_SID)
+    .verifications.create({ to: phoneNumber, channel: "whatsapp" })
+    .catch(async (err: unknown) => {
+      const e = err as { code?: number; message?: string };
+      if (e?.code === 60200) {
+        // WhatsApp channel not available for this number — fallback to SMS
+        logger.info({ phoneNumber }, "WhatsApp not available, falling back to SMS");
+        await client!.verify.v2
+          .services(VERIFY_SID)
+          .verifications.create({ to: phoneNumber, channel: "sms" });
+      } else {
+        throw err;
+      }
+    });
+
+  logger.info({ phoneNumber }, "OTP sent via Twilio Verify");
 }
 
-export async function verifyOTP(
-  phoneNumber: string,
-  code: string
-): Promise<boolean> {
-  const now = new Date();
-
-  const [stored] = await db
-    .select()
-    .from(otpCodes)
-    .where(
-      and(
-        eq(otpCodes.phoneNumber, phoneNumber),
-        gt(otpCodes.expiresAt, now)
-      )
-    )
-    .limit(1);
-
-  if (!stored) return false;
-
-  // Increment attempts
-  await db
-    .update(otpCodes)
-    .set({ attempts: stored.attempts + 1 })
-    .where(eq(otpCodes.id, stored.id));
-
-  // Max 5 attempts
-  if (stored.attempts >= 5) {
-    await db.delete(otpCodes).where(eq(otpCodes.id, stored.id));
+export async function verifyOTP(phoneNumber: string, code: string): Promise<boolean> {
+  if (!client || !VERIFY_SID) {
+    // Dev fallback — always fail (user should see code in console)
+    logger.warn("Twilio not configured — cannot verify OTP");
     return false;
   }
 
-  if (stored.code !== code) return false;
-
-  // Valid — delete used OTP
-  await db.delete(otpCodes).where(eq(otpCodes.id, stored.id));
-  return true;
+  try {
+    const check = await client.verify.v2
+      .services(VERIFY_SID)
+      .verificationChecks.create({ to: phoneNumber, code });
+    return check.status === "approved";
+  } catch (err: unknown) {
+    const e = err as { code?: number };
+    // 20404 = verification not found / already used / expired
+    if (e?.code === 20404) return false;
+    throw err;
+  }
 }

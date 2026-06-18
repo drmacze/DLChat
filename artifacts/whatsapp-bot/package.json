@@ -1,13 +1,14 @@
 {
-  "name": "dlchat-whatsapp-bot",
+  "name": "@workspace/whatsapp-bot",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "dev": "node index.js",
     "start": "node index.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.18",
     "node-fetch": "^3.3.2",
-    "pino": "^9.14.0"
+    "pino": "^9.6.0"
   }
 }
