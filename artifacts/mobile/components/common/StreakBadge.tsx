@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { View, Text, StyleSheet, Animated } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useTheme } from "@/context/ThemeContext";
+import { FireIcon } from "@/components/common/SvgIcons";
 
 interface StreakBadgeProps {
   streak: number;
@@ -37,7 +38,7 @@ export default function StreakBadge({ streak, size = "md" }: StreakBadgeProps) {
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
         style={[styles.badge, { height: s.badge, borderRadius: s.badge / 2, paddingHorizontal: s.px }]}
       >
-        <Text style={{ fontSize: s.fire }}>🔥</Text>
+        <FireIcon size={s.fire} />
         <Text style={[styles.count, { fontSize: s.text }]}>{streak}</Text>
       </LinearGradient>
     </Animated.View>

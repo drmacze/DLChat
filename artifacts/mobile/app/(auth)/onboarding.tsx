@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   ScrollView,
 } from "react-native";
+import { WaveIcon } from "@/components/common/SvgIcons";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -55,7 +56,7 @@ export default function OnboardingScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <LinearGradient colors={["#2AABEE20", "transparent"]} style={styles.heroGradient} />
-      <View style={styles.icon}><Text style={{ fontSize: 48 }}>👋</Text></View>
+      <View style={styles.icon}><WaveIcon size={52} /></View>
       <Text style={[styles.title, { color: c.foreground }]}>Set up profile</Text>
       <Text style={[styles.subtitle, { color: c.mutedForeground }]}>Let others know who you are</Text>
 

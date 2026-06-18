@@ -7,6 +7,7 @@ import * as Haptics from "expo-haptics";
 import { useRequestOtp } from "@workspace/api-client-react";
 import { useTheme } from "@/context/ThemeContext";
 import DlavieLogo from "@/components/common/DlavieLogo";
+import { RobotIcon, FireIcon, ChatBubbleIcon } from "@/components/common/SvgIcons";
 
 const COUNTRY_CODES = [
   { code: "+62", name: "ID", flag: "🇮🇩" },
@@ -138,9 +139,14 @@ export default function LoginScreen() {
         </TouchableOpacity>
 
         <View style={styles.features}>
-          {["🤖 AI Friends", "🔥 Streaks", "💬 Real-time Chat"].map((f) => (
-            <View key={f} style={[styles.featureChip, { backgroundColor: c.surface, borderColor: c.border }]}>
-              <Text style={[styles.featureText, { color: c.mutedForeground }]}>{f}</Text>
+          {([
+            { icon: <RobotIcon size={15} />, label: "AI Friends" },
+            { icon: <FireIcon size={15} />, label: "Streaks" },
+            { icon: <ChatBubbleIcon size={15} />, label: "Real-time Chat" },
+          ] as const).map(({ icon, label }) => (
+            <View key={label} style={[styles.featureChip, { backgroundColor: c.surface, borderColor: c.border }]}>
+              {icon}
+              <Text style={[styles.featureText, { color: c.mutedForeground }]}>{label}</Text>
             </View>
           ))}
         </View>
@@ -171,7 +177,7 @@ const styles = StyleSheet.create({
   continueBtnGradient: { height: 58, alignItems: "center", justifyContent: "center" },
   continueBtnText: { color: "#fff", fontSize: 17, fontWeight: "700", fontFamily: "Inter_700Bold" },
   features: { flexDirection: "row", gap: 8, marginBottom: 20, flexWrap: "wrap", justifyContent: "center" },
-  featureChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1 },
+  featureChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1 },
   featureText: { fontSize: 13, fontFamily: "Inter_500Medium" },
   disclaimer: { fontSize: 12, textAlign: "center", lineHeight: 18, fontFamily: "Inter_400Regular" },
 });

@@ -10,8 +10,9 @@ import StreakBadge from "@/components/common/StreakBadge";
 import TutorialOverlay from "@/components/common/TutorialOverlay";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
+import { FireIcon, TrophyIcon } from "@/components/common/SvgIcons";
 
-const BASE_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}`;
+import { BASE_URL } from "@/utils/api";
 
 export default function ProfileScreen() {
   const { c } = useTheme();
@@ -88,7 +89,7 @@ export default function ProfileScreen() {
           <LinearGradient colors={c.streakGradient} style={styles.streakAccent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
           <View style={styles.streakBody}>
             <View style={styles.streakStat}>
-              <Text style={{ fontSize: 30 }}>🔥</Text>
+              <FireIcon size={32} />
               <View>
                 <Text style={[styles.streakNum, { color: c.foreground }]}>{streak}</Text>
                 <Text style={[styles.streakLabel, { color: c.mutedForeground }]}>Day Streak</Text>
@@ -96,7 +97,7 @@ export default function ProfileScreen() {
             </View>
             <View style={[styles.streakDiv, { backgroundColor: c.border }]} />
             <View style={styles.streakStat}>
-              <Text style={{ fontSize: 30 }}>🏆</Text>
+              <TrophyIcon size={32} />
               <View>
                 <Text style={[styles.streakNum, { color: c.foreground }]}>{longestStreak}</Text>
                 <Text style={[styles.streakLabel, { color: c.mutedForeground }]}>Best Ever</Text>
@@ -137,7 +138,7 @@ export default function ProfileScreen() {
         tutorialKey="profile"
         steps={[
           { icon: "user", title: "Your Profile", description: "This is your public profile. Tap Edit Profile to update your name, username, and bio." },
-          { icon: "zap", title: "Fire Streak 🔥", description: "Use DLChat daily to build your streak. Missing a day resets it!" },
+          { icon: "zap", title: "Fire Streak", description: "Use DLChat daily to build your streak. Missing a day resets it!" },
           { icon: "settings", title: "Settings & Theme", description: "Tap Settings to switch between dark and light mode, manage AI friends, and more." },
         ]}
       />

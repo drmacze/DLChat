@@ -11,8 +11,9 @@ import FloatingActionButton from "@/components/common/FloatingActionButton";
 import TutorialOverlay from "@/components/common/TutorialOverlay";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
+import { RobotIcon, StarIcon, PeopleIcon, GlobeIcon } from "@/components/common/SvgIcons";
 
-const BASE_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}`;
+import { BASE_URL } from "@/utils/api";
 
 const MOOD_EMOJI: Record<string, string> = {
   happy: "😄", chill: "😎", playful: "🤪", flirty: "😏", sad: "🥺", excited: "🔥", tired: "😪", sarcastic: "🙃",
@@ -52,7 +53,11 @@ export default function ContactsScreen() {
       </LinearGradient>
       <Text style={[styles.aiName, { color: c.foreground }]} numberOfLines={1}>{item.name}</Text>
       <View style={styles.aiMeta}>
-        <Text style={{ fontSize: 12 }}>{COUNTRY_FLAG[item.country] ?? "🌍"}</Text>
+        {COUNTRY_FLAG[item.country] ? (
+          <Text style={{ fontSize: 12 }}>{COUNTRY_FLAG[item.country]}</Text>
+        ) : (
+          <GlobeIcon size={14} />
+        )}
         <Text style={{ fontSize: 12 }}>{MOOD_EMOJI[item.mood] ?? "😊"}</Text>
       </View>
       <Text style={[styles.aiAge, { color: c.mutedForeground }]}>{item.age}y</Text>
@@ -76,7 +81,7 @@ export default function ContactsScreen() {
             {/* AI Friends Section */}
             <View style={styles.sectionHeader}>
               <LinearGradient colors={c.aiGradient} style={styles.sectionIconBg} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
-                <Text style={{ fontSize: 14 }}>🤖</Text>
+                <RobotIcon size={16} />
               </LinearGradient>
               <Text style={[styles.sectionTitle, { color: c.foreground }]}>AI Friends</Text>
               <Text style={[styles.sectionSub, { color: c.mutedForeground }]}>Always online</Text>
@@ -117,7 +122,7 @@ export default function ContactsScreen() {
               <Text style={[styles.contactName, { color: c.foreground }]}>{item.customName ?? item.user.displayName}</Text>
               {item.user.username && <Text style={[styles.contactHandle, { color: c.mutedForeground }]}>@{item.user.username}</Text>}
             </View>
-            {item.isFavorite && <Text style={{ fontSize: 14 }}>⭐</Text>}
+            {item.isFavorite && <StarIcon size={18} />}
             <TouchableOpacity style={[styles.chatBtn, { backgroundColor: c.primary + "18", borderRadius: 20 }]} onPress={() => router.push("/search")}>
               <Feather name="message-circle" size={18} color={c.primary} />
             </TouchableOpacity>
@@ -126,7 +131,7 @@ export default function ContactsScreen() {
         ListEmptyComponent={
           contacts.length === 0 ? (
             <View style={styles.empty}>
-              <Text style={{ fontSize: 44 }}>👥</Text>
+              <PeopleIcon size={52} />
               <Text style={[styles.emptyTitle, { color: c.foreground }]}>No contacts yet</Text>
               <Text style={[styles.emptySubtitle, { color: c.mutedForeground }]}>Search for users to add as contacts</Text>
             </View>
@@ -144,7 +149,7 @@ export default function ContactsScreen() {
       <TutorialOverlay
         tutorialKey="contacts"
         steps={[
-          { icon: "cpu", title: "AI Friends 🤖", description: "These AI friends are always online! Chat with them anytime — they have unique personalities and moods." },
+          { icon: "cpu", title: "AI Friends", description: "These AI friends are always online! Chat with them anytime — they have unique personalities and moods." },
           { icon: "users", title: "Real Contacts", description: "Your added contacts appear below the AI friends section." },
           { icon: "user-plus", title: "Add Contacts", description: "Tap the + button or FAB to search for and add real users." },
         ]}

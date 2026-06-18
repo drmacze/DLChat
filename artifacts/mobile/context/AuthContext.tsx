@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { setBaseUrl, setAuthTokenGetter } from "@workspace/api-client-react";
+import { BASE_URL } from "@/utils/api";
 
-const BASE_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}`;
 setBaseUrl(BASE_URL);
 
 interface UserProfile {

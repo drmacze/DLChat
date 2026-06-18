@@ -7,6 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import PostCard from "@/components/feed/PostCard";
 import FloatingActionButton from "@/components/common/FloatingActionButton";
 import { useTheme } from "@/context/ThemeContext";
+import { CameraIcon } from "@/components/common/SvgIcons";
 
 export default function FeedScreen() {
   const { c } = useTheme();
@@ -51,7 +52,7 @@ export default function FeedScreen() {
           )}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={{ fontSize: 48 }}>📸</Text>
+              <CameraIcon size={60} />
               <Text style={[styles.emptyTitle, { color: c.foreground }]}>No posts yet</Text>
               <Text style={[styles.emptySubtitle, { color: c.mutedForeground }]}>Share your first moment with friends</Text>
             </View>

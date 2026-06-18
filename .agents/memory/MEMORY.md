@@ -2,3 +2,4 @@
 - [DLChat Theme System](dlchat-theme.md) — ThemeContext wraps entire app in _layout.tsx; all screens use useTheme() not colors.dark directly
 - [DLChat AI & Streak Routes](dlchat-routes.md) — new tables: streaks, ai_contacts, ai_messages; routes registered in routes/index.ts as /ai/* and /streak
 - [DLChat Color Tokens](dlchat-color-tokens.md) — no secondarySurface; use c.surface for reply bg, c.messageThemBg for received bubbles, c.messageMeGradient for sent
+- [DLChat SVG Icons & Storage](dlchat-icons-storage.md) — SvgIcons.tsx replaces all UI emojis; BASE_URL from utils/api.ts; App Storage wired at /api/storage/*; permanent domain via EXPO_PUBLIC_API_URL
