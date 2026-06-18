@@ -72,6 +72,7 @@ router.patch("/me", requireAuth, async (req: AuthRequest, res) => {
         bio: z.string().max(200).optional(),
         statusText: z.string().max(100).optional(),
         avatarUrl: z.string().url().optional(),
+        phoneNumber: z.string().min(7).max(20).nullable().optional(),
         privacyLastSeen: z.enum(["everyone", "contacts", "nobody"]).optional(),
         privacyProfilePhoto: z.enum(["everyone", "contacts", "nobody"]).optional(),
         privacyReadReceipts: z.boolean().optional(),

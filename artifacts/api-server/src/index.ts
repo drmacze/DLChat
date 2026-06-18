@@ -57,7 +57,7 @@ async function runMigrations() {
 
       CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        phone_number TEXT NOT NULL UNIQUE,
+        phone_number TEXT UNIQUE,
         username TEXT UNIQUE,
         display_name TEXT NOT NULL,
         bio TEXT,
