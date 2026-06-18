@@ -3,12 +3,12 @@ import { logger } from "./logger.js";
 
 const TWILIO_ACCOUNT_SID = process.env["TWILIO_ACCOUNT_SID"];
 const TWILIO_AUTH_TOKEN = process.env["TWILIO_AUTH_TOKEN"];
-const TWILIO_WHATSAPP_FROM = process.env["TWILIO_WHATSAPP_FROM"] || "whatsapp:+14155238886";
-const TWILIO_WHATSAPP_CONTENT_SID = process.env["TWILIO_WHATSAPP_CONTENT_SID"];
+const TWILIO_VERIFY_SERVICE_SID = process.env["TWILIO_VERIFY_SERVICE_SID"];
 
-const isTwilioConfigured = !!TWILIO_ACCOUNT_SID && !!TWILIO_AUTH_TOKEN && !!TWILIO_WHATSAPP_CONTENT_SID;
+const isTwilioConfigured =
+  !!TWILIO_ACCOUNT_SID && !!TWILIO_AUTH_TOKEN && !!TWILIO_VERIFY_SERVICE_SID;
 
-// Dev-mode in-memory OTP store (not for production)
+// Dev-mode in-memory OTP store (only used when Twilio is not configured)
 const devOtpStore = new Map<string, { code: string; expiresAt: number }>();
 
 function generateOtp(): string {
@@ -20,24 +20,20 @@ function getTwilioClient() {
 }
 
 export async function sendOTP(phoneNumber: string): Promise<void> {
-  const code = generateOtp();
-
   if (isTwilioConfigured) {
     const client = getTwilioClient();
-    const whatsappTo = phoneNumber.startsWith("whatsapp:") ? phoneNumber : `whatsapp:${phoneNumber}`;
-    await client.messages.create({
-      to: whatsappTo,
-      from: TWILIO_WHATSAPP_FROM,
-      contentSid: TWILIO_WHATSAPP_CONTENT_SID!,
-      contentVariables: JSON.stringify({ "1": code }),
-    });
-    // Store code for verification
-    devOtpStore.set(phoneNumber, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
-    logger.info({ phoneNumber }, "OTP sent via WhatsApp");
+    await client.verify.v2
+      .services(TWILIO_VERIFY_SERVICE_SID!)
+      .verifications.create({
+        to: phoneNumber,
+        channel: "whatsapp",
+      });
+    logger.info({ phoneNumber }, "OTP sent via Twilio Verify (WhatsApp)");
     return;
   }
 
   // Dev fallback: store in memory and log to console
+  const code = generateOtp();
   devOtpStore.set(phoneNumber, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
   logger.warn(
     { phoneNumber, code },
@@ -50,6 +46,23 @@ export async function verifyOTP(
   phoneNumber: string,
   code: string
 ): Promise<boolean> {
+  if (isTwilioConfigured) {
+    try {
+      const client = getTwilioClient();
+      const check = await client.verify.v2
+        .services(TWILIO_VERIFY_SERVICE_SID!)
+        .verificationChecks.create({
+          to: phoneNumber,
+          code,
+        });
+      return check.status === "approved";
+    } catch (err) {
+      logger.error({ err, phoneNumber }, "Twilio Verify check error");
+      return false;
+    }
+  }
+
+  // Dev fallback
   const stored = devOtpStore.get(phoneNumber);
   if (!stored) return false;
   if (Date.now() > stored.expiresAt) {
