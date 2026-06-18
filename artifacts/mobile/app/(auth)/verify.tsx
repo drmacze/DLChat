@@ -213,7 +213,7 @@ export default function VerifyScreen() {
         </View>
 
         <Text style={[styles.disclaimer, { color: c.mutedForeground }]}>
-          Didn't get it? Check your WhatsApp messages.
+          Didn't get it? Check your SMS messages.
         </Text>
       </View>
     </View>

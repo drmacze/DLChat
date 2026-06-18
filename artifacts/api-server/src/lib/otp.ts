@@ -26,9 +26,9 @@ export async function sendOTP(phoneNumber: string): Promise<void> {
       .services(TWILIO_VERIFY_SERVICE_SID!)
       .verifications.create({
         to: phoneNumber,
-        channel: "whatsapp",
+        channel: "sms",
       });
-    logger.info({ phoneNumber }, "OTP sent via Twilio Verify (WhatsApp)");
+    logger.info({ phoneNumber }, "OTP sent via Twilio Verify (SMS)");
     return;
   }
 

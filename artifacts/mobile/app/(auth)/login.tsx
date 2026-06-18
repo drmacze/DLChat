@@ -146,7 +146,7 @@ export default function LoginScreen() {
         </View>
 
         <Text style={[styles.disclaimer, { color: c.mutedForeground }]}>
-          By continuing, you agree to our Terms of Service and Privacy Policy.{"\n"}A verification code will be sent via WhatsApp.
+          By continuing, you agree to our Terms of Service and Privacy Policy.{"\n"}A verification code will be sent via SMS.
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
