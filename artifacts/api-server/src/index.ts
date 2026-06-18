@@ -235,6 +235,28 @@ async function runMigrations() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
 
+      -- Add columns that may be missing from older schema versions
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS status_text TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_online BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_last_seen privacy_level NOT NULL DEFAULT 'everyone';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_profile_photo privacy_level NOT NULL DEFAULT 'everyone';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_read_receipts BOOLEAN NOT NULL DEFAULT true;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+      -- Add unique constraints if not already present
+      DO $$ BEGIN
+        ALTER TABLE users ADD CONSTRAINT users_username_unique UNIQUE (username);
+      EXCEPTION WHEN duplicate_table THEN null; END $$;
+      DO $$ BEGIN
+        ALTER TABLE users ADD CONSTRAINT users_phone_number_unique UNIQUE (phone_number);
+      EXCEPTION WHEN duplicate_table THEN null; END $$;
+
       CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone_number);
       CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
       CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
