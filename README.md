@@ -6,7 +6,7 @@ A production-ready fullstack mobile chat + social app built with Expo, Express, 
 - Frontend: Expo / React Native (iOS + Android)
 - Backend: Express 5 + PostgreSQL + Drizzle ORM
 - Realtime: Socket.IO
-- Auth: Twilio OTP + JWT
+- Auth: 
 - Storage: Supabase
 - Push Notifications: Expo Push API
 
