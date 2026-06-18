@@ -60,8 +60,9 @@ export const reportTargetEnum = pgEnum("report_target", [
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().default(d),
-  phoneNumber: text("phone_number").notNull().unique(),
+  phoneNumber: text("phone_number").unique(),
   username: text("username").unique(),
+  passwordHash: text("password_hash"),
   displayName: text("display_name").notNull(),
   bio: text("bio"),
   avatarUrl: text("avatar_url"),

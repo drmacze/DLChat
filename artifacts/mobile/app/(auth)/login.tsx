@@ -1,52 +1,72 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from "react-native";
+import {
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
+} from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
-import { useRequestOtp } from "@workspace/api-client-react";
+import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import DlavieLogo from "@/components/common/DlavieLogo";
 import { RobotIcon, FireIcon, ChatBubbleIcon } from "@/components/common/SvgIcons";
-
-const COUNTRY_CODES = [
-  { code: "+62", name: "ID", flag: "🇮🇩" },
-  { code: "+1",  name: "US", flag: "🇺🇸" },
-  { code: "+44", name: "UK", flag: "🇬🇧" },
-  { code: "+65", name: "SG", flag: "🇸🇬" },
-  { code: "+61", name: "AU", flag: "🇦🇺" },
-  { code: "+49", name: "DE", flag: "🇩🇪" },
-  { code: "+33", name: "FR", flag: "🇫🇷" },
-  { code: "+81", name: "JP", flag: "🇯🇵" },
-  { code: "+91", name: "IN", flag: "🇮🇳" },
-  { code: "+55", name: "BR", flag: "🇧🇷" },
-];
+import { useRegisterUser, useLoginUser } from "@workspace/api-client-react";
 
 export default function LoginScreen() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
-  const [phone, setPhone] = useState("");
-  const [countryCode, setCountryCode] = useState("+62");
+  const { setAuth } = useAuth();
+
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
-  const requestOtp = useRequestOtp();
+  const [showPassword, setShowPassword] = useState(false);
 
-  const selectedCountry = COUNTRY_CODES.find(cc => cc.code === countryCode);
+  const registerMutation = useRegisterUser();
+  const loginMutation = useLoginUser();
+  const isPending = registerMutation.isPending || loginMutation.isPending;
 
-  const handleContinue = async () => {
-    const fullPhone = `${countryCode}${phone.replace(/^0/, "")}`;
-    if (phone.length < 6) { setError("Please enter a valid phone number"); return; }
+  const switchMode = (next: "login" | "register") => {
+    setMode(next);
     setError("");
+    registerMutation.reset();
+    loginMutation.reset();
+  };
+
+  const handleSubmit = () => {
+    setError("");
+    if (!username.trim()) { setError("Masukkan username"); return; }
+    if (!password) { setError("Masukkan password"); return; }
+    if (mode === "register" && !displayName.trim()) { setError("Masukkan nama tampilan"); return; }
+    if (mode === "register" && password.length < 6) { setError("Password minimal 6 karakter"); return; }
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    requestOtp.mutate(
-      { data: { phoneNumber: fullPhone } },
-      {
-        onSuccess: () => router.push({ pathname: "/(auth)/verify", params: { phone: fullPhone } }),
-        onError: (err: unknown) => {
-          const e = err as { response?: { data?: { error?: string } } };
-          setError(e?.response?.data?.error ?? "Failed to send OTP. Please try again.");
-        },
-      }
-    );
+
+    const onSuccess = async (data: { token: string; user: Parameters<typeof setAuth>[1]; isNewUser: boolean }) => {
+      await setAuth(data.token, data.user);
+      router.replace("/(tabs)/chats");
+    };
+
+    const onError = (err: unknown) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      const e = err as { data?: { error?: string }; message?: string };
+      setError(e?.data?.error ?? e?.message ?? "Terjadi kesalahan. Coba lagi.");
+    };
+
+    if (mode === "register") {
+      registerMutation.mutate(
+        { data: { username: username.trim(), password, displayName: displayName.trim() } },
+        { onSuccess: onSuccess as never, onError }
+      );
+    } else {
+      loginMutation.mutate(
+        { data: { username: username.trim(), password } },
+        { onSuccess: onSuccess as never, onError }
+      );
+    }
   };
 
   return (
@@ -56,7 +76,6 @@ export default function LoginScreen() {
         style={{ backgroundColor: c.background }}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Background gradient */}
         <LinearGradient
           colors={[c.primary + "18", "transparent"]}
           style={styles.heroGradient}
@@ -66,56 +85,85 @@ export default function LoginScreen() {
         <DlavieLogo size={88} />
         <Text style={[styles.title, { color: c.foreground }]}>DLChat</Text>
         <Text style={[styles.subtitle, { color: c.mutedForeground }]}>
-          Enter your phone number to get started
+          {mode === "login" ? "Masuk ke akunmu" : "Buat akun baru"}
         </Text>
 
-        {/* Phone input */}
-        <View style={[styles.phoneContainer, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <View style={[styles.codeSelector, { borderRightColor: c.border }]}>
-            <Text style={{ fontSize: 18 }}>{selectedCountry?.flag}</Text>
-            <Text style={[styles.code, { color: c.foreground }]}>{countryCode}</Text>
+        {/* Mode toggle */}
+        <View style={[styles.toggleRow, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <TouchableOpacity
+            style={[styles.toggleBtn, mode === "login" && { backgroundColor: c.primary }]}
+            onPress={() => switchMode("login")}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.toggleText, { color: mode === "login" ? "#fff" : c.mutedForeground }]}>
+              Masuk
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleBtn, mode === "register" && { backgroundColor: c.primary }]}
+            onPress={() => switchMode("register")}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.toggleText, { color: mode === "register" ? "#fff" : c.mutedForeground }]}>
+              Daftar
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Display name (register only) */}
+        {mode === "register" && (
+          <View style={[styles.inputWrap, { backgroundColor: c.surface, borderColor: c.border }]}>
+            <Text style={[styles.inputLabel, { color: c.mutedForeground }]}>Nama Tampilan</Text>
+            <TextInput
+              style={[styles.input, { color: c.foreground }]}
+              placeholder="Nama kamu"
+              placeholderTextColor={c.mutedForeground}
+              value={displayName}
+              onChangeText={setDisplayName}
+              maxLength={64}
+              autoFocus
+            />
           </View>
+        )}
+
+        {/* Username */}
+        <View style={[styles.inputWrap, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <Text style={[styles.inputLabel, { color: c.mutedForeground }]}>Username</Text>
           <TextInput
-            style={[styles.phoneInput, { color: c.foreground }]}
-            placeholder="8xx xxxx xxxx"
+            style={[styles.input, { color: c.foreground }]}
+            placeholder="contoh: budi123"
             placeholderTextColor={c.mutedForeground}
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-            maxLength={15}
-            autoFocus
+            value={username}
+            onChangeText={(v) => setUsername(v.replace(/\s/g, ""))}
+            autoCapitalize="none"
+            autoCorrect={false}
+            maxLength={32}
+            autoFocus={mode === "login"}
           />
         </View>
 
-        {/* Country picker */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.countryList}
-          contentContainerStyle={{ gap: 8 }}
-        >
-          {COUNTRY_CODES.map((cc) => {
-            const selected = countryCode === cc.code;
-            return (
-              <TouchableOpacity
-                key={cc.code}
-                style={[
-                  styles.countryChip,
-                  selected
-                    ? { backgroundColor: c.primary, borderColor: c.primary }
-                    : { backgroundColor: c.surface, borderColor: c.border },
-                ]}
-                onPress={() => setCountryCode(cc.code)}
-                activeOpacity={0.75}
-              >
-                <Text style={{ fontSize: 16 }}>{cc.flag}</Text>
-                <Text style={[styles.countryDialCode, { color: selected ? "#fff" : c.mutedForeground }]}>
-                  {cc.code}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+        {/* Password */}
+        <View style={[styles.inputWrap, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <Text style={[styles.inputLabel, { color: c.mutedForeground }]}>Password</Text>
+          <View style={styles.passwordRow}>
+            <TextInput
+              style={[styles.input, styles.passwordInput, { color: c.foreground }]}
+              placeholder={mode === "register" ? "Minimal 6 karakter" : "Password kamu"}
+              placeholderTextColor={c.mutedForeground}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={128}
+            />
+            <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
+              <Text style={{ color: c.mutedForeground, fontSize: 13, fontFamily: "Inter_500Medium" }}>
+                {showPassword ? "Sembunyikan" : "Lihat"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {error ? (
           <View style={[styles.errorBox, { backgroundColor: c.danger + "15", borderColor: c.danger + "30" }]}>
@@ -124,16 +172,18 @@ export default function LoginScreen() {
         ) : null}
 
         <TouchableOpacity
-          style={[styles.continueBtn, { opacity: requestOtp.isPending ? 0.6 : 1 }]}
-          onPress={handleContinue}
-          disabled={requestOtp.isPending}
+          style={[styles.continueBtn, { opacity: isPending ? 0.6 : 1 }]}
+          onPress={handleSubmit}
+          disabled={isPending}
           activeOpacity={0.85}
         >
           <LinearGradient colors={c.primaryGradient} style={styles.continueBtnGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
-            {requestOtp.isPending ? (
+            {isPending ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.continueBtnText}>Continue →</Text>
+              <Text style={styles.continueBtnText}>
+                {mode === "login" ? "Masuk →" : "Daftar →"}
+              </Text>
             )}
           </LinearGradient>
         </TouchableOpacity>
@@ -152,7 +202,7 @@ export default function LoginScreen() {
         </View>
 
         <Text style={[styles.disclaimer, { color: c.mutedForeground }]}>
-          By continuing, you agree to our Terms of Service and Privacy Policy.{"\n"}A verification code will be sent via SMS.
+          Dengan melanjutkan, kamu menyetujui Syarat Layanan dan Kebijakan Privasi kami.
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -163,14 +213,16 @@ const styles = StyleSheet.create({
   container: { flexGrow: 1, paddingHorizontal: 24, alignItems: "center" },
   heroGradient: { position: "absolute", top: 0, left: 0, right: 0, height: 280 },
   title: { fontSize: 34, fontWeight: "800", fontFamily: "Inter_700Bold", marginBottom: 8, marginTop: 18 },
-  subtitle: { fontSize: 15, textAlign: "center", marginBottom: 32, fontFamily: "Inter_400Regular", lineHeight: 22 },
-  phoneContainer: { flexDirection: "row", alignItems: "center", width: "100%", borderRadius: 16, borderWidth: 1, overflow: "hidden", height: 58, marginBottom: 12 },
-  codeSelector: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, gap: 6, borderRightWidth: 1, height: "100%" },
-  code: { fontSize: 15, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
-  phoneInput: { flex: 1, fontSize: 16, fontFamily: "Inter_400Regular", paddingHorizontal: 14 },
-  countryList: { width: "100%", marginBottom: 16 },
-  countryChip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, borderWidth: 1, gap: 5 },
-  countryDialCode: { fontSize: 13, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
+  subtitle: { fontSize: 15, textAlign: "center", marginBottom: 28, fontFamily: "Inter_400Regular", lineHeight: 22 },
+  toggleRow: { flexDirection: "row", borderRadius: 14, borderWidth: 1, padding: 4, marginBottom: 20, gap: 4, width: "100%" },
+  toggleBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center" },
+  toggleText: { fontSize: 15, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
+  inputWrap: { width: "100%", borderRadius: 16, borderWidth: 1, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10, marginBottom: 12 },
+  inputLabel: { fontSize: 12, fontFamily: "Inter_500Medium", marginBottom: 4 },
+  input: { fontSize: 16, fontFamily: "Inter_400Regular", paddingVertical: 4 },
+  passwordRow: { flexDirection: "row", alignItems: "center" },
+  passwordInput: { flex: 1 },
+  eyeBtn: { paddingLeft: 8, paddingVertical: 4 },
   errorBox: { width: "100%", borderRadius: 12, padding: 12, borderWidth: 1, marginBottom: 16 },
   errorText: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center" },
   continueBtn: { width: "100%", borderRadius: 16, overflow: "hidden", marginBottom: 20, marginTop: 4 },
