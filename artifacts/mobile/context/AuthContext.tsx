@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { setBaseUrl, setAuthTokenGetter } from "@workspace/api-client-react";
+import { router } from "expo-router";
+import { setBaseUrl, setAuthTokenGetter, setUnauthorizedHandler } from "@workspace/api-client-react";
 import { BASE_URL } from "@/utils/api";
 
 setBaseUrl(BASE_URL);
@@ -46,19 +47,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const logoutRef = useRef<() => Promise<void>>();
+
+  const logout = async () => {
+    await AsyncStorage.multiRemove(["auth_token", "auth_user"]);
+    setToken(null);
+    setUser(null);
+    setAuthTokenGetter(() => null);
+    setUnauthorizedHandler(null);
+    router.replace("/(auth)/login");
+  };
+  logoutRef.current = logout;
 
   useEffect(() => {
-    let currentToken: string | null = null;
-    setAuthTokenGetter(() => currentToken);
-
     AsyncStorage.multiGet(["auth_token", "auth_user"]).then(([tokenPair, userPair]) => {
       const storedToken = tokenPair[1];
       const storedUser = userPair[1];
       if (storedToken && storedUser) {
-        currentToken = storedToken;
         setToken(storedToken);
         setUser(JSON.parse(storedUser));
         setAuthTokenGetter(() => storedToken);
+        setUnauthorizedHandler(() => { logoutRef.current?.(); });
       }
       setIsLoading(false);
     });
@@ -72,18 +81,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(newToken);
     setUser(newUser);
     setAuthTokenGetter(() => newToken);
+    setUnauthorizedHandler(() => { logoutRef.current?.(); });
   };
 
   const updateUser = (newUser: UserProfile) => {
     setUser(newUser);
     AsyncStorage.setItem("auth_user", JSON.stringify(newUser));
-  };
-
-  const logout = async () => {
-    await AsyncStorage.multiRemove(["auth_token", "auth_user"]);
-    setToken(null);
-    setUser(null);
-    setAuthTokenGetter(() => null);
   };
 
   return (

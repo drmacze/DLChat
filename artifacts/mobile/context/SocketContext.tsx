@@ -1,7 +1,16 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
 import { useAuth } from "./AuthContext";
 import { BASE_URL } from "@/utils/api";
+
+export interface IncomingCall {
+  conversationId: string;
+  callType: "voice" | "video";
+  callerId: string;
+  callerName: string;
+  callerAvatar: string | null;
+  roomId: string;
+}
 
 interface SocketContextValue {
   socket: Socket | null;
@@ -10,6 +19,12 @@ interface SocketContextValue {
   leaveConversation: (conversationId: string) => void;
   sendTyping: (conversationId: string) => void;
   stopTyping: (conversationId: string) => void;
+  initiateCall: (conversationId: string, callType: "voice" | "video") => void;
+  acceptCall: (conversationId: string) => void;
+  rejectCall: (conversationId: string) => void;
+  endCall: (conversationId: string) => void;
+  incomingCall: IncomingCall | null;
+  clearIncomingCall: () => void;
 }
 
 const SocketContext = createContext<SocketContextValue>({
@@ -19,6 +34,12 @@ const SocketContext = createContext<SocketContextValue>({
   leaveConversation: () => {},
   sendTyping: () => {},
   stopTyping: () => {},
+  initiateCall: () => {},
+  acceptCall: () => {},
+  rejectCall: () => {},
+  endCall: () => {},
+  incomingCall: null,
+  clearIncomingCall: () => {},
 });
 
 export function SocketProvider({ children }: { children: React.ReactNode }) {
@@ -26,6 +47,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const socketRef = useRef<Socket | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
 
   useEffect(() => {
     if (!token) {
@@ -49,6 +71,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     newSocket.on("connect", () => setIsConnected(true));
     newSocket.on("disconnect", () => setIsConnected(false));
     newSocket.on("connect_error", (err) => console.warn("Socket error:", err.message));
+    newSocket.on("call:incoming", (data: IncomingCall) => setIncomingCall(data));
+    newSocket.on("call:ended", () => setIncomingCall(null));
+    newSocket.on("call:rejected", () => setIncomingCall(null));
 
     socketRef.current = newSocket;
     setSocket(newSocket);
@@ -61,25 +86,51 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     };
   }, [token]);
 
-  const joinConversation = (conversationId: string) => {
+  const joinConversation = useCallback((conversationId: string) => {
     socketRef.current?.emit("conversation:join", { conversationId });
-  };
+  }, []);
 
-  const leaveConversation = (conversationId: string) => {
+  const leaveConversation = useCallback((conversationId: string) => {
     socketRef.current?.emit("conversation:leave", { conversationId });
-  };
+  }, []);
 
-  const sendTyping = (conversationId: string) => {
+  const sendTyping = useCallback((conversationId: string) => {
     socketRef.current?.emit("typing:start", { conversationId });
-  };
+  }, []);
 
-  const stopTyping = (conversationId: string) => {
+  const stopTyping = useCallback((conversationId: string) => {
     socketRef.current?.emit("typing:stop", { conversationId });
-  };
+  }, []);
+
+  const initiateCall = useCallback((conversationId: string, callType: "voice" | "video") => {
+    socketRef.current?.emit("call:init", { conversationId, callType });
+  }, []);
+
+  const acceptCall = useCallback((conversationId: string) => {
+    socketRef.current?.emit("call:accept", { conversationId });
+    setIncomingCall(null);
+  }, []);
+
+  const rejectCall = useCallback((conversationId: string) => {
+    socketRef.current?.emit("call:reject", { conversationId });
+    setIncomingCall(null);
+  }, []);
+
+  const endCall = useCallback((conversationId: string) => {
+    socketRef.current?.emit("call:end", { conversationId });
+  }, []);
+
+  const clearIncomingCall = useCallback(() => setIncomingCall(null), []);
 
   return (
     <SocketContext.Provider
-      value={{ socket, isConnected, joinConversation, leaveConversation, sendTyping, stopTyping }}
+      value={{
+        socket, isConnected,
+        joinConversation, leaveConversation,
+        sendTyping, stopTyping,
+        initiateCall, acceptCall, rejectCall, endCall,
+        incomingCall, clearIncomingCall,
+      }}
     >
       {children}
     </SocketContext.Provider>

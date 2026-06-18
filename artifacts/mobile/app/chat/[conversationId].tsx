@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -8,7 +8,8 @@ import {
   ActivityIndicator,
   Platform,
   Alert,
-  ActionSheetIOS,
+  TextInput,
+  Clipboard,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,12 +21,17 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import * as Haptics from "expo-haptics";
 import MessageBubble from "@/components/chat/MessageBubble";
 import MessageInput from "@/components/chat/MessageInput";
+import MessageActionsModal from "@/components/chat/MessageActionsModal";
+import ForwardModal from "@/components/chat/ForwardModal";
 import Avatar from "@/components/common/Avatar";
-import colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 import { useSocket } from "@/context/SocketContext";
+import { useTheme } from "@/context/ThemeContext";
+import { BASE_URL } from "@/utils/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 type MessageItem = {
   id: string;
@@ -36,44 +42,70 @@ type MessageItem = {
   editedAt?: string | null;
   deletedAt?: string | null;
   senderId: string;
-  sender: { id: string; displayName: string; avatarUrl?: string | null; isOnline?: boolean };
+  isPinned?: boolean;
+  isStarred?: boolean;
+  forwardedFromMessageId?: string | null;
+  sender: { id: string; displayName: string; avatarUrl?: string | null; isOnline?: boolean; lastSeenAt?: string | null };
   reactions: Array<{ emoji: string; count: number; users: string[] }>;
   replyTo?: { content?: string | null; senderName: string; mediaUrl?: string | null } | null;
   status?: string | null;
 };
 
+function formatLastSeen(iso: string | null | undefined): string {
+  if (!iso) return "Terakhir terlihat baru-baru ini";
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return "Terakhir terlihat baru saja";
+  if (diff < 3600) return `Terakhir terlihat ${Math.floor(diff / 60)} mnt lalu`;
+  if (diff < 86400) return `Terakhir terlihat ${Math.floor(diff / 3600)} jam lalu`;
+  const days = Math.floor(diff / 86400);
+  return `Terakhir terlihat ${days} hari lalu`;
+}
+
+async function getToken(): Promise<string | null> {
+  return AsyncStorage.getItem("auth_token");
+}
+
 export default function ChatRoomScreen() {
-  const c = colors.dark;
+  const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const { user } = useAuth();
-  const { socket, joinConversation, leaveConversation, sendTyping, stopTyping } = useSocket();
+  const { socket, joinConversation, leaveConversation, sendTyping, stopTyping, initiateCall } = useSocket();
   const queryClient = useQueryClient();
+  const sendMessage = useSendMessage();
+
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
   const [localMessages, setLocalMessages] = useState<MessageItem[]>([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const oldestMessageId = useRef<string | null>(null);
-  const sendMessage = useSendMessage();
+
+  const [selectedMessage, setSelectedMessage] = useState<MessageItem | null>(null);
+  const [showActionsModal, setShowActionsModal] = useState(false);
+  const [showForwardModal, setShowForwardModal] = useState(false);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
+
+  const [pinnedMessage, setPinnedMessage] = useState<MessageItem | null>(null);
 
   const { data: convData } = useGetConversation(conversationId!, {
     query: { queryKey: ["conversation", conversationId] },
   });
 
   const { data: messagesData, isLoading } = useGetMessages(conversationId!, {}, {
-    query: {
-      queryKey: ["messages", conversationId],
-    },
+    query: { queryKey: ["messages", conversationId] },
   });
 
   useEffect(() => {
     if (messagesData?.messages) {
-      setLocalMessages(messagesData.messages as MessageItem[]);
+      const msgs = messagesData.messages as MessageItem[];
+      setLocalMessages(msgs);
       setHasMore((messagesData as any).hasMore ?? false);
-      if (messagesData.messages.length > 0) {
-        oldestMessageId.current = (messagesData.messages[0] as MessageItem).id;
-      }
+      if (msgs.length > 0) oldestMessageId.current = msgs[0].id;
+      const pinned = msgs.find((m) => m.isPinned);
+      if (pinned) setPinnedMessage(pinned);
     }
   }, [messagesData]);
 
@@ -91,9 +123,7 @@ export default function ChatRoomScreen() {
         if (prev.find((m) => m.id === msg.id)) return prev;
         return [...prev, msg];
       });
-      // Mark as read
       socket.emit("message:read", { messageId: msg.id, conversationId });
-      // Invalidate conversation list for unread badge
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     };
 
@@ -122,6 +152,15 @@ export default function ChatRoomScreen() {
       setTypingUsers((prev) => { const next = new Set(prev); next.delete(userId); return next; });
     };
 
+    const handlePin = ({ messageId, isPinned }: { messageId: string; isPinned: boolean; conversationId: string }) => {
+      setLocalMessages((prev) => {
+        const updated = prev.map((m) => m.id === messageId ? { ...m, isPinned } : { ...m, isPinned: false });
+        const pinned = updated.find((m) => m.isPinned);
+        setPinnedMessage(pinned ?? null);
+        return updated;
+      });
+    };
+
     socket.on("message:new", handleNewMessage);
     socket.on("message:updated", handleMessageUpdated);
     socket.on("message:deleted", handleMessageDeleted);
@@ -129,6 +168,7 @@ export default function ChatRoomScreen() {
     socket.on("message:read", handleMessageRead);
     socket.on("typing:start", handleTypingStart);
     socket.on("typing:stop", handleTypingStop);
+    socket.on("message:pin", handlePin);
 
     return () => {
       socket.off("message:new", handleNewMessage);
@@ -138,6 +178,7 @@ export default function ChatRoomScreen() {
       socket.off("message:read", handleMessageRead);
       socket.off("typing:start", handleTypingStart);
       socket.off("typing:stop", handleTypingStop);
+      socket.off("message:pin", handlePin);
     };
   }, [socket, conversationId, user?.id]);
 
@@ -145,10 +186,7 @@ export default function ChatRoomScreen() {
     if (!hasMore || isLoadingMore || !oldestMessageId.current) return;
     setIsLoadingMore(true);
     try {
-      const BASE_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}`;
-      const token = await import("@react-native-async-storage/async-storage").then(
-        (m) => m.default.getItem("auth_token")
-      );
+      const token = await getToken();
       const res = await fetch(
         `${BASE_URL}/api/conversations/${conversationId}/messages?before=${oldestMessageId.current}&limit=50`,
         { headers: { Authorization: `Bearer ${token}` } }
@@ -160,11 +198,8 @@ export default function ChatRoomScreen() {
         setLocalMessages((prev) => [...data.messages, ...prev]);
       }
       setHasMore(data.hasMore ?? false);
-    } catch (err) {
-      console.warn("Load more error:", err);
-    } finally {
-      setIsLoadingMore(false);
-    }
+    } catch {}
+    finally { setIsLoadingMore(false); }
   }, [hasMore, isLoadingMore, conversationId]);
 
   const handleSend = useCallback((text: string, mediaUrl?: string, type?: string) => {
@@ -181,88 +216,114 @@ export default function ChatRoomScreen() {
       },
       {
         onSuccess: () => setReplyingTo(null),
-        onError: () => Alert.alert("Error", "Failed to send message. Please try again."),
+        onError: () => Alert.alert("Error", "Gagal mengirim pesan. Coba lagi."),
       }
     );
   }, [conversationId, replyingTo]);
 
-  const handleReact = useCallback(async (messageId: string, emoji: string) => {
+  const handleReact = useCallback(async (emoji: string) => {
+    if (!selectedMessage) return;
     try {
-      const BASE_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}`;
-      const token = await import("@react-native-async-storage/async-storage").then(
-        (m) => m.default.getItem("auth_token")
-      );
-      await fetch(`${BASE_URL}/api/messages/${messageId}/reactions`, {
+      const token = await getToken();
+      await fetch(`${BASE_URL}/api/messages/${selectedMessage.id}/reactions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ emoji }),
       });
     } catch {}
-  }, []);
+  }, [selectedMessage]);
 
   const handleDeleteMessage = useCallback(async (messageId: string) => {
-    try {
-      const BASE_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}`;
-      const token = await import("@react-native-async-storage/async-storage").then(
-        (m) => m.default.getItem("auth_token")
-      );
-      const res = await fetch(`${BASE_URL}/api/messages/${messageId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) Alert.alert("Error", "Could not delete message.");
-    } catch {
-      Alert.alert("Error", "Could not delete message.");
-    }
+    Alert.alert("Hapus Pesan", "Pesan ini akan dihapus.", [
+      { text: "Batal", style: "cancel" },
+      {
+        text: "Hapus", style: "destructive", onPress: async () => {
+          try {
+            const token = await getToken();
+            await fetch(`${BASE_URL}/api/messages/${messageId}`, {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${token}` },
+            });
+          } catch { Alert.alert("Error", "Tidak dapat menghapus pesan."); }
+        }
+      },
+    ]);
   }, []);
 
-  const handleLongPress = useCallback((msg: MessageItem) => {
-    const isMe = msg.senderId === user?.id;
-    const options = isMe
-      ? ["Reply", "React 👍", "React ❤️", "React 😂", "Delete", "Cancel"]
-      : ["Reply", "React 👍", "React ❤️", "React 😂", "Cancel"];
-    const destructiveIdx = isMe ? 4 : undefined;
-    const cancelIdx = isMe ? 5 : 4;
+  const handlePin = useCallback(async () => {
+    if (!selectedMessage) return;
+    try {
+      const token = await getToken();
+      await fetch(`${BASE_URL}/api/messages/${selectedMessage.id}/pin`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch { Alert.alert("Error", "Tidak dapat pin pesan."); }
+  }, [selectedMessage]);
 
-    if (Platform.OS === "ios") {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options, destructiveButtonIndex: destructiveIdx, cancelButtonIndex: cancelIdx },
-        (idx) => {
-          if (idx === 0) setReplyingTo(msg);
-          else if (idx === 1) handleReact(msg.id, "👍");
-          else if (idx === 2) handleReact(msg.id, "❤️");
-          else if (idx === 3) handleReact(msg.id, "😂");
-          else if (isMe && idx === 4) {
-            Alert.alert("Delete Message", "Are you sure?", [
-              { text: "Cancel", style: "cancel" },
-              { text: "Delete", style: "destructive", onPress: () => handleDeleteMessage(msg.id) },
-            ]);
-          }
-        }
-      );
-    } else {
-      Alert.alert("Message Options", "", [
-        { text: "Reply", onPress: () => setReplyingTo(msg) },
-        { text: "React 👍", onPress: () => handleReact(msg.id, "👍") },
-        { text: "React ❤️", onPress: () => handleReact(msg.id, "❤️") },
-        { text: "React 😂", onPress: () => handleReact(msg.id, "😂") },
-        ...(isMe ? [{ text: "Delete", style: "destructive" as const, onPress: () => handleDeleteMessage(msg.id) }] : []),
-        { text: "Cancel", style: "cancel" as const },
-      ]);
+  const handleStar = useCallback(async () => {
+    if (!selectedMessage) return;
+    try {
+      const token = await getToken();
+      const res = await fetch(`${BASE_URL}/api/messages/${selectedMessage.id}/star`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setLocalMessages((prev) => prev.map((m) =>
+        m.id === selectedMessage.id ? { ...m, isStarred: data.isStarred } : m
+      ));
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch { Alert.alert("Error", "Tidak dapat bintangi pesan."); }
+  }, [selectedMessage]);
+
+  const handleCopy = useCallback(() => {
+    if (selectedMessage?.content) {
+      Clipboard.setString(selectedMessage.content);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-  }, [user?.id, handleReact, handleDeleteMessage]);
+  }, [selectedMessage]);
+
+  const handleLongPress = useCallback((msg: MessageItem) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setSelectedMessage(msg);
+    setShowActionsModal(true);
+  }, []);
+
+  const handleCall = useCallback((callType: "voice" | "video") => {
+    if (!conversationId || !conv) return;
+    initiateCall(conversationId, callType);
+    router.push({
+      pathname: "/call/[conversationId]",
+      params: {
+        conversationId,
+        type: callType,
+        displayName,
+        avatarUrl: otherUser?.avatarUrl ?? "",
+      },
+    } as any);
+  }, [conversationId, conv]);
 
   const conv = convData;
-  const otherUser = conv?.type === "direct"
-    ? conv.members.find((m: { userId: string; user: { displayName: string; avatarUrl?: string | null; isOnline?: boolean } }) => m.userId !== user?.id)?.user
+  const isAI = (conv as any)?.isAI === true;
+  const otherMember = conv?.type === "direct"
+    ? conv.members.find((m: { userId: string }) => m.userId !== user?.id)
     : null;
+  const otherUser = otherMember?.user ?? null;
   const displayName = conv?.type === "direct"
     ? (otherUser?.displayName ?? "Chat")
     : (conv?.title ?? "Group Chat");
 
+  const filteredMessages = useMemo(() => {
+    if (!searchQuery.trim()) return localMessages;
+    const q = searchQuery.toLowerCase();
+    return localMessages.filter((m) => m.content?.toLowerCase().includes(q));
+  }, [localMessages, searchQuery]);
+
   const renderMessage = useCallback(({ item, index }: { item: MessageItem; index: number }) => {
     const isMe = item.senderId === user?.id;
-    const prevMessage = localMessages[index + 1];
+    const prevMessage = filteredMessages[index + 1];
     const showAvatar = !isMe && (!prevMessage || prevMessage.senderId !== item.senderId);
     return (
       <MessageBubble
@@ -270,29 +331,102 @@ export default function ChatRoomScreen() {
         isMe={isMe}
         showAvatar={showAvatar}
         onLongPress={() => handleLongPress(item)}
+        currentUserId={user?.id}
       />
     );
-  }, [user?.id, localMessages, handleLongPress]);
+  }, [user?.id, filteredMessages, handleLongPress]);
 
-  const reversedMessages = [...localMessages].reverse();
+  const reversedMessages = useMemo(() => [...filteredMessages].reverse(), [filteredMessages]);
 
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
+      {/* Header */}
       <View style={[styles.header, { backgroundColor: c.sidebar, borderBottomColor: c.border, paddingTop: Platform.OS === "web" ? 67 : insets.top }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
           <Feather name="arrow-left" size={22} color={c.foreground} />
         </TouchableOpacity>
-        <Avatar uri={otherUser?.avatarUrl} name={displayName} size={38} isOnline={otherUser?.isOnline} />
-        <View style={styles.headerInfo}>
-          <Text style={[styles.headerName, { color: c.foreground }]} numberOfLines={1}>{displayName}</Text>
-          <Text style={[styles.headerStatus, { color: typingUsers.size > 0 ? c.primary : otherUser?.isOnline ? c.online : c.mutedForeground }]}>
-            {typingUsers.size > 0 ? "typing..." : otherUser?.isOnline ? "online" : "offline"}
+        <TouchableOpacity style={styles.headerProfile} onPress={() => otherUser && router.push(`/profile/${otherUser.id}` as any)} activeOpacity={0.8}>
+          <Avatar uri={otherUser?.avatarUrl} name={displayName} size={36} isOnline={otherUser?.isOnline} />
+          <View style={styles.headerInfo}>
+            <Text style={[styles.headerName, { color: c.foreground }]} numberOfLines={1}>{displayName}</Text>
+            <Text style={[styles.headerStatus, {
+              color: typingUsers.size > 0 ? c.primary
+                : otherUser?.isOnline ? c.online
+                : c.mutedForeground
+            }]} numberOfLines={1}>
+              {typingUsers.size > 0 ? "✏️ sedang mengetik..."
+                : otherUser?.isOnline ? "● Online"
+                : formatLastSeen(otherUser?.lastSeenAt)}
+            </Text>
+          </View>
+        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => setShowSearch((s) => !s)}>
+            <Feather name={showSearch ? "x" : "search"} size={20} color={c.foreground} />
+          </TouchableOpacity>
+          {!isAI && (
+            <>
+              <TouchableOpacity style={styles.headerBtn} onPress={() => handleCall("voice")}>
+                <Feather name="phone" size={20} color={c.primary} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.headerBtn} onPress={() => handleCall("video")}>
+                <Feather name="video" size={20} color={c.primary} />
+              </TouchableOpacity>
+            </>
+          )}
+          <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/starred-messages" as any)}>
+            <Feather name="star" size={20} color={c.foreground} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Search Bar */}
+      {showSearch && (
+        <View style={[styles.searchBar, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+          <Feather name="search" size={16} color={c.mutedForeground} />
+          <TextInput
+            style={[styles.searchInput, { color: c.foreground }]}
+            placeholder="Cari pesan..."
+            placeholderTextColor={c.mutedForeground}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoFocus
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery("")}>
+              <Feather name="x-circle" size={16} color={c.mutedForeground} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {/* Pinned Message Bar */}
+      {pinnedMessage && !showSearch && (
+        <TouchableOpacity
+          style={[styles.pinnedBar, { backgroundColor: `${c.primary}18`, borderBottomColor: c.border }]}
+          activeOpacity={0.8}
+        >
+          <Feather name="map-pin" size={14} color={c.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.pinnedLabel, { color: c.primary }]}>Pesan Disematkan</Text>
+            <Text style={[styles.pinnedContent, { color: c.mutedForeground }]} numberOfLines={1}>
+              {pinnedMessage.content ?? (pinnedMessage.type !== "text" ? `[${pinnedMessage.type}]` : "Media")}
+            </Text>
+          </View>
+          <TouchableOpacity onPress={() => setPinnedMessage(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Feather name="x" size={16} color={c.mutedForeground} />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      )}
+
+      {/* Search result count */}
+      {showSearch && searchQuery.trim().length > 0 && (
+        <View style={[styles.searchResultBar, { backgroundColor: c.surface }]}>
+          <Text style={[styles.searchResultText, { color: c.mutedForeground }]}>
+            {filteredMessages.length} pesan ditemukan
           </Text>
         </View>
-        <TouchableOpacity style={styles.headerBtn}>
-          <Feather name="more-vertical" size={22} color={c.foreground} />
-        </TouchableOpacity>
-      </View>
+      )}
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={0}>
         {isLoading ? (
@@ -315,7 +449,9 @@ export default function ChatRoomScreen() {
             ListHeaderComponent={
               typingUsers.size > 0 ? (
                 <View style={styles.typingIndicator}>
-                  <Text style={[styles.typingText, { color: c.mutedForeground }]}>typing...</Text>
+                  <View style={[styles.typingBubble, { backgroundColor: c.surface }]}>
+                    <Text style={[styles.typingDots, { color: c.mutedForeground }]}>● ● ●</Text>
+                  </View>
                 </View>
               ) : null
             }
@@ -329,7 +465,9 @@ export default function ChatRoomScreen() {
           <View style={[styles.replyBar, { backgroundColor: c.surface, borderTopColor: c.border }]}>
             <View style={[styles.replyBarLine, { backgroundColor: c.primary }]} />
             <View style={{ flex: 1 }}>
-              <Text style={[styles.replyBarName, { color: c.primary }]}>{replyingTo.sender.displayName}</Text>
+              <Text style={[styles.replyBarName, { color: c.primary }]}>
+                Membalas {replyingTo.sender.displayName}
+              </Text>
               <Text style={[styles.replyBarContent, { color: c.mutedForeground }]} numberOfLines={1}>
                 {replyingTo.content ?? (replyingTo.type !== "text" ? `[${replyingTo.type}]` : "Media")}
               </Text>
@@ -346,23 +484,67 @@ export default function ChatRoomScreen() {
           onStopTyping={() => stopTyping(conversationId!)}
         />
       </KeyboardAvoidingView>
+
+      {/* Message Actions Modal */}
+      <MessageActionsModal
+        visible={showActionsModal}
+        message={selectedMessage as any}
+        isMe={selectedMessage?.senderId === user?.id}
+        onClose={() => setShowActionsModal(false)}
+        onReact={(emoji) => handleReact(emoji)}
+        onReply={() => { setReplyingTo(selectedMessage); }}
+        onForward={() => setShowForwardModal(true)}
+        onPin={handlePin}
+        onStar={handleStar}
+        onDelete={() => selectedMessage && handleDeleteMessage(selectedMessage.id)}
+        onCopy={handleCopy}
+      />
+
+      {/* Forward Modal */}
+      <ForwardModal
+        visible={showForwardModal}
+        messageId={selectedMessage?.id ?? null}
+        onClose={() => setShowForwardModal(false)}
+        onForwarded={() => Alert.alert("✅", "Pesan berhasil diteruskan!")}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingBottom: 10, borderBottomWidth: StyleSheet.hairlineWidth, gap: 10 },
-  backBtn: { width: 38, height: 38, alignItems: "center", justifyContent: "center" },
-  headerInfo: { flex: 1 },
-  headerName: { fontSize: 16, fontWeight: "700", fontFamily: "Inter_700Bold" },
-  headerStatus: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  header: {
+    flexDirection: "row", alignItems: "center", paddingHorizontal: 4,
+    paddingBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth, gap: 2,
+  },
   headerBtn: { width: 38, height: 38, alignItems: "center", justifyContent: "center" },
+  headerProfile: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 2 },
+  headerInfo: { flex: 1 },
+  headerName: { fontSize: 15, fontWeight: "700", fontFamily: "Inter_700Bold" },
+  headerStatus: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  headerActions: { flexDirection: "row" },
+  searchBar: {
+    flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14,
+    paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  searchInput: { flex: 1, fontSize: 15, fontFamily: "Inter_400Regular" },
+  searchResultBar: { paddingHorizontal: 16, paddingVertical: 6 },
+  searchResultText: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  pinnedBar: {
+    flexDirection: "row", alignItems: "center", paddingHorizontal: 14,
+    paddingVertical: 8, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  pinnedLabel: { fontSize: 11, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
+  pinnedContent: { fontSize: 13, fontFamily: "Inter_400Regular" },
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
-  typingIndicator: { paddingHorizontal: 20, paddingVertical: 8 },
-  typingText: { fontSize: 13, fontStyle: "italic", fontFamily: "Inter_400Regular" },
-  replyBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, gap: 10 },
-  replyBarLine: { width: 3, height: "100%", borderRadius: 2 },
+  typingIndicator: { paddingHorizontal: 16, paddingVertical: 8, alignItems: "flex-start" },
+  typingBubble: { borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8 },
+  typingDots: { fontSize: 16, letterSpacing: 3 },
+  replyBar: {
+    flexDirection: "row", alignItems: "center", paddingHorizontal: 12,
+    paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, gap: 10,
+  },
+  replyBarLine: { width: 3, alignSelf: "stretch", borderRadius: 2 },
   replyBarName: { fontSize: 13, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
   replyBarContent: { fontSize: 12, fontFamily: "Inter_400Regular" },
   replyBarClose: { padding: 4 },

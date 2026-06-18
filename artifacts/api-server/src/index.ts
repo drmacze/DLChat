@@ -301,6 +301,15 @@ async function runMigrations() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
       CREATE INDEX IF NOT EXISTS idx_ai_messages_user_contact ON ai_messages(user_id, ai_contact_id);
+
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT false;
+
+      CREATE TABLE IF NOT EXISTS starred_messages (
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, message_id)
+      );
     `);
     logger.info("Database schema initialized");
   } catch (err) {

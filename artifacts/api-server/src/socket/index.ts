@@ -131,6 +131,48 @@ export function setupSocket(server: HttpServer) {
       }
     });
 
+    // ── Voice/Video Call Signaling ──────────────────────────────────────────
+    socket.on("call:init", async ({ conversationId, callType }: { conversationId: string; callType: "voice" | "video" }) => {
+      try {
+        const [member] = await db.select().from(conversationMembers)
+          .where(and(eq(conversationMembers.conversationId, conversationId), eq(conversationMembers.userId, userId)))
+          .limit(1);
+        if (!member) return;
+        const [caller] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+        socket.to(`conv:${conversationId}`).emit("call:incoming", {
+          conversationId,
+          callType,
+          callerId: userId,
+          callerName: caller?.displayName ?? "Unknown",
+          callerAvatar: caller?.avatarUrl ?? null,
+          roomId: `dlchat-${conversationId}`,
+        });
+      } catch (err) {
+        logger.error({ err }, "call:init error");
+      }
+    });
+
+    socket.on("call:accept", ({ conversationId }: { conversationId: string }) => {
+      socket.to(`conv:${conversationId}`).emit("call:accepted", { conversationId, userId });
+    });
+
+    socket.on("call:reject", ({ conversationId }: { conversationId: string }) => {
+      socket.to(`conv:${conversationId}`).emit("call:rejected", { conversationId, userId });
+    });
+
+    socket.on("call:end", ({ conversationId }: { conversationId: string }) => {
+      socket.to(`conv:${conversationId}`).emit("call:ended", { conversationId, userId });
+    });
+
+    socket.on("call:busy", ({ conversationId }: { conversationId: string }) => {
+      socket.to(`conv:${conversationId}`).emit("call:busy", { conversationId, userId });
+    });
+
+    // ── Message Pin ──────────────────────────────────────────────────────────
+    socket.on("message:pin", ({ conversationId, messageId, isPinned }: { conversationId: string; messageId: string; isPinned: boolean }) => {
+      socket.to(`conv:${conversationId}`).emit("message:pin", { conversationId, messageId, isPinned });
+    });
+
     socket.on("disconnect", async () => {
       logger.info({ userId }, "Socket disconnected");
       // Clear all typing indicators for this user
