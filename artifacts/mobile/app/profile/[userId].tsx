@@ -35,9 +35,9 @@ export default function UserProfileScreen() {
   };
 
   const handleAddContact = () => {
-    if (!userId) return;
+    if (!userId || !user) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    addContact.mutate({ data: { userId } as unknown as Parameters<typeof addContact.mutate>[0]["data"] });
+    addContact.mutate({ data: { username: user.username ?? undefined } });
   };
 
   if (isLoading) {

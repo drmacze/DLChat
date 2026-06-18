@@ -64,13 +64,6 @@ export default function ChatRoomScreen() {
   const { data: messagesData, isLoading } = useGetMessages(conversationId!, {}, {
     query: {
       queryKey: ["messages", conversationId],
-      onSuccess: (data: { messages: MessageItem[]; hasMore: boolean }) => {
-        setLocalMessages(data.messages ?? []);
-        setHasMore(data.hasMore ?? false);
-        if (data.messages?.length > 0) {
-          oldestMessageId.current = data.messages[0].id;
-        }
-      },
     },
   });
 

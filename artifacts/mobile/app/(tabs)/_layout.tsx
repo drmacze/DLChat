@@ -36,6 +36,7 @@ export default function TabLayout() {
           ) : null,
       }}
     >
+      <Tabs.Screen name="index" options={{ href: null }} />
       <Tabs.Screen
         name="chats"
         options={{
