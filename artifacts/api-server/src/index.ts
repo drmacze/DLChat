@@ -235,6 +235,9 @@ async function runMigrations() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
 
+      -- Fix existing columns: drop NOT NULL on phone_number (now optional)
+      ALTER TABLE users ALTER COLUMN phone_number DROP NOT NULL;
+
       -- Add columns that may be missing from older schema versions
       ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;
