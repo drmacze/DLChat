@@ -245,6 +245,37 @@ async function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_push_tokens_user ON push_tokens(user_id);
       CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at);
       CREATE INDEX IF NOT EXISTS idx_stories_expires ON stories(expires_at);
+
+      CREATE TABLE IF NOT EXISTS streaks (
+        user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        current_streak INTEGER NOT NULL DEFAULT 1,
+        longest_streak INTEGER NOT NULL DEFAULT 1,
+        last_active_date TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS ai_contacts (
+        id TEXT PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        country TEXT NOT NULL,
+        gender TEXT NOT NULL,
+        persona_json TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_contacts_user ON ai_contacts(user_id);
+
+      CREATE TABLE IF NOT EXISTS ai_messages (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        ai_contact_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        mood TEXT NOT NULL DEFAULT 'happy',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_messages_user_contact ON ai_messages(user_id, ai_contact_id);
     `);
     logger.info("Database schema initialized");
   } catch (err) {

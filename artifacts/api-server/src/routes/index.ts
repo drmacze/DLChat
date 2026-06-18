@@ -11,6 +11,8 @@ import storiesRouter from "./stories.js";
 import notificationsRouter from "./notifications.js";
 import uploadRouter from "./upload.js";
 import reportsRouter from "./reports.js";
+import aiRouter from "./ai.js";
+import streakRouter from "./streak.js";
 
 const router: IRouter = Router();
 
@@ -26,6 +28,8 @@ router.use("/stories", storiesRouter);
 router.use("/notifications", notificationsRouter);
 router.use("/upload", uploadRouter);
 router.use("/reports", reportsRouter);
+router.use("/ai", aiRouter);
+router.use("/streak", streakRouter);
 router.use("/", reportsRouter);
 
 export default router;
