@@ -14,8 +14,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
 import { useSocket } from "@/context/SocketContext";
 import { useQueryClient } from "@tanstack/react-query";
-
-const BASE_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}`;
+import { BASE_URL } from "@/utils/api";
 
 export default function ChatsScreen() {
   const { c } = useTheme();
@@ -23,7 +22,7 @@ export default function ChatsScreen() {
   const { socket } = useSocket();
   const { token } = useAuth();
   const queryClient = useQueryClient();
-  const { data, isLoading, refetch, isRefetching, error } = useGetConversations({ query: { queryKey: ["conversations"] } });
+  const { data, isLoading, refetch, isRefetching, error } = useGetConversations({ query: { queryKey: ["conversations"], enabled: !!token } });
 
   const { data: streakData } = useQuery({
     queryKey: ["streak"],

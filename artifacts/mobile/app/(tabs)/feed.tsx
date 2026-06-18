@@ -7,13 +7,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import PostCard from "@/components/feed/PostCard";
 import FloatingActionButton from "@/components/common/FloatingActionButton";
 import { useTheme } from "@/context/ThemeContext";
+import { useAuth } from "@/context/AuthContext";
 import { CameraIcon } from "@/components/common/SvgIcons";
 
 export default function FeedScreen() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
+  const { token } = useAuth();
   const queryClient = useQueryClient();
-  const { data, isLoading, refetch, isRefetching } = useGetFeed({}, { query: { queryKey: ["feed"] } });
+  const { data, isLoading, refetch, isRefetching } = useGetFeed({}, { query: { queryKey: ["feed"], enabled: !!token } });
   const likePost = useLikePost();
   const unlikePost = useUnlikePost();
   const posts = data?.posts ?? [];

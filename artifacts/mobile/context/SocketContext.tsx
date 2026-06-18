@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { useAuth } from "./AuthContext";
+import { BASE_URL } from "@/utils/api";
 
 interface SocketContextValue {
   socket: Socket | null;
@@ -37,7 +38,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const newSocket = io(`https://${process.env.EXPO_PUBLIC_DOMAIN}`, {
+    const newSocket = io(BASE_URL, {
       auth: { token },
       transports: ["websocket", "polling"],
       reconnection: true,

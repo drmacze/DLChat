@@ -28,7 +28,7 @@ export default function ContactsScreen() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const { token } = useAuth();
-  const { data, isLoading, refetch, isRefetching } = useGetContacts({ query: { queryKey: ["contacts"] } });
+  const { data, isLoading, refetch, isRefetching } = useGetContacts({ query: { queryKey: ["contacts"], enabled: !!token } });
 
   const { data: aiData, isLoading: aiLoading, refetch: aiRefetch } = useQuery({
     queryKey: ["ai-contacts"],
@@ -97,7 +97,7 @@ export default function ContactsScreen() {
                 contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16, gap: 10 }}
                 showsHorizontalScrollIndicator={false}
                 ListEmptyComponent={
-                  <Text style={[styles.aiEmpty, { color: c.mutedForeground }]}>Loading AI friends...</Text>
+                  <Text style={[styles.aiEmpty, { color: c.mutedForeground }]}>Belum ada AI friends</Text>
                 }
               />
             )}
