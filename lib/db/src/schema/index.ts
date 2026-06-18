@@ -4,6 +4,7 @@ import {
   text,
   boolean,
   timestamp,
+  integer,
   pgEnum,
   unique,
 } from "drizzle-orm/pg-core";
@@ -313,6 +314,16 @@ export const pushTokens = pgTable(
   },
   (t) => [unique().on(t.token)]
 );
+
+export const otpCodes = pgTable("otp_codes", {
+  id: uuid("id").primaryKey().default(d),
+  phoneNumber: text("phone_number").notNull(),
+  code: text("code").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+});
 
 export const channelInvites = pgTable("channel_invites", {
   id: uuid("id").primaryKey().default(d),
