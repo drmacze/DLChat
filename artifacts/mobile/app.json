@@ -2,7 +2,6 @@
   "expo": {
     "name": "Dlavie Chat",
     "slug": "mobile",
-    "owner": "drmacze",
     "version": "1.0.0",
     "runtimeVersion": {
       "policy": "appVersion"
