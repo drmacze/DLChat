@@ -1,4 +1,4 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -17,23 +17,53 @@ import ChatListItem from "@/components/chat/ChatListItem";
 import FloatingActionButton from "@/components/common/FloatingActionButton";
 import colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
+import { useSocket } from "@/context/SocketContext";
+import { useQueryClient } from "@tanstack/react-query";
 
 export default function ChatsScreen() {
   const c = colors.dark;
   const insets = useSafeAreaInsets();
-  const { data, isLoading, refetch, isRefetching } = useGetConversations({
+  const { socket } = useSocket();
+  const queryClient = useQueryClient();
+  const { data, isLoading, refetch, isRefetching, error } = useGetConversations({
     query: { queryKey: ["conversations"] },
   });
+
+  // Refresh conversation list on new message from socket
+  useEffect(() => {
+    if (!socket) return;
+    const handler = () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    };
+    socket.on("message:new", handler);
+    return () => { socket.off("message:new", handler); };
+  }, [socket, queryClient]);
 
   const conversations = data?.conversations ?? [];
 
   const renderEmpty = () => (
     <View style={styles.empty}>
       <Feather name="message-circle" size={48} color={c.mutedForeground} />
-      <Text style={[styles.emptyTitle, { color: c.foreground }]}>No conversations</Text>
+      <Text style={[styles.emptyTitle, { color: c.foreground }]}>No conversations yet</Text>
       <Text style={[styles.emptySubtitle, { color: c.mutedForeground }]}>
-        Start a new chat or search for users
+        Search for a contact and start chatting!
       </Text>
+    </View>
+  );
+
+  const renderError = () => (
+    <View style={styles.empty}>
+      <Feather name="alert-circle" size={48} color="#EF4444" />
+      <Text style={[styles.emptyTitle, { color: c.foreground }]}>Could not load chats</Text>
+      <Text style={[styles.emptySubtitle, { color: c.mutedForeground }]}>
+        Check your connection and pull to refresh.
+      </Text>
+      <TouchableOpacity
+        style={[styles.retryBtn, { backgroundColor: c.primary }]}
+        onPress={() => refetch()}
+      >
+        <Text style={styles.retryText}>Retry</Text>
+      </TouchableOpacity>
     </View>
   );
 
@@ -64,6 +94,8 @@ export default function ChatsScreen() {
         <View style={styles.loading}>
           <ActivityIndicator color={c.primary} size="large" />
         </View>
+      ) : error ? (
+        renderError()
       ) : (
         <FlatList
           data={conversations}
@@ -76,17 +108,23 @@ export default function ChatsScreen() {
             />
           )}
           ListEmptyComponent={renderEmpty}
-          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={c.primary} />}
-          contentContainerStyle={conversations.length === 0 ? { flex: 1 } : { paddingBottom: Platform.OS === "web" ? 84 : insets.bottom + 80 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefetching}
+              onRefresh={refetch}
+              tintColor={c.primary}
+              colors={[c.primary]}
+            />
+          }
+          contentContainerStyle={
+            conversations.length === 0
+              ? { flex: 1 }
+              : { paddingBottom: Platform.OS === "web" ? 84 : insets.bottom + 80 }
+          }
         />
       )}
 
-      <View
-        style={[
-          styles.fab,
-          { bottom: Platform.OS === "web" ? 100 : insets.bottom + 20 },
-        ]}
-      >
+      <View style={[styles.fab, { bottom: Platform.OS === "web" ? 100 : insets.bottom + 20 }]}>
         <FloatingActionButton onPress={() => router.push("/search")} icon="edit" size={56} />
       </View>
     </View>
@@ -110,5 +148,7 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10, paddingHorizontal: 40 },
   emptyTitle: { fontSize: 18, fontWeight: "700", fontFamily: "Inter_700Bold" },
   emptySubtitle: { fontSize: 14, textAlign: "center", fontFamily: "Inter_400Regular", lineHeight: 20 },
+  retryBtn: { marginTop: 8, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 10 },
+  retryText: { color: "#fff", fontWeight: "600", fontFamily: "Inter_600SemiBold" },
   fab: { position: "absolute", right: 20 },
 });

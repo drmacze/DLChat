@@ -149,7 +149,7 @@ export default function LoginScreen() {
         </TouchableOpacity>
 
         <Text style={[styles.disclaimer, { color: c.mutedForeground }]}>
-          By continuing, you agree to our Terms of Service and Privacy Policy.{"\n"}A verification code will be sent via SMS.
+          By continuing, you agree to our Terms of Service and Privacy Policy.{"\n"}A verification code will be sent via WhatsApp.
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>

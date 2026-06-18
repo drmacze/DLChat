@@ -61,9 +61,10 @@ export default function VerifyScreen() {
     verifyOtp.mutate(
       { data: { phoneNumber: phone!, code } },
       {
-        onSuccess: async (data) => {
-          await setAuth(data.token, data.user as Parameters<typeof setAuth>[1]);
-          if (data.isNewUser) {
+        onSuccess: async (data: unknown) => {
+          const d = data as { token: string; user: Parameters<typeof setAuth>[1]; isNewUser: boolean };
+          await setAuth(d.token, d.user);
+          if (d.isNewUser) {
             router.replace("/(auth)/onboarding");
           } else {
             router.replace("/(tabs)/chats");

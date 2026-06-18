@@ -30,7 +30,7 @@ export default function UserProfileScreen() {
     if (!userId) return;
     createDirect.mutate(
       { data: { targetUserId: userId } },
-      { onSuccess: (data) => router.push(`/chat/${data.id}`) }
+      { onSuccess: (data: unknown) => router.push(`/chat/${(data as { id: string }).id}`) }
     );
   };
 

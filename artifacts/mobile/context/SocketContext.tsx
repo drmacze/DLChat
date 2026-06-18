@@ -23,6 +23,7 @@ const SocketContext = createContext<SocketContextValue>({
 export function SocketProvider({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
   const socketRef = useRef<Socket | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
@@ -30,28 +31,31 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
+        setSocket(null);
         setIsConnected(false);
       }
       return;
     }
 
-    const socket = io(`https://${process.env.EXPO_PUBLIC_DOMAIN}`, {
+    const newSocket = io(`https://${process.env.EXPO_PUBLIC_DOMAIN}`, {
       auth: { token },
-      transports: ["websocket"],
+      transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
     });
 
-    socket.on("connect", () => setIsConnected(true));
-    socket.on("disconnect", () => setIsConnected(false));
-    socket.on("connect_error", (err) => console.error("Socket error:", err.message));
+    newSocket.on("connect", () => setIsConnected(true));
+    newSocket.on("disconnect", () => setIsConnected(false));
+    newSocket.on("connect_error", (err) => console.warn("Socket error:", err.message));
 
-    socketRef.current = socket;
+    socketRef.current = newSocket;
+    setSocket(newSocket);
 
     return () => {
-      socket.disconnect();
+      newSocket.disconnect();
       socketRef.current = null;
+      setSocket(null);
       setIsConnected(false);
     };
   }, [token]);
@@ -74,14 +78,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <SocketContext.Provider
-      value={{
-        socket: socketRef.current,
-        isConnected,
-        joinConversation,
-        leaveConversation,
-        sendTyping,
-        stopTyping,
-      }}
+      value={{ socket, isConnected, joinConversation, leaveConversation, sendTyping, stopTyping }}
     >
       {children}
     </SocketContext.Provider>

@@ -26,6 +26,9 @@ export function setupSocket(server: HttpServer) {
     transports: ["websocket", "polling"],
   });
 
+  // Typing timeout safety: auto-stop after 5s if client disconnects mid-type
+  const typingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+
   io.use(async (socket: AuthSocket, next) => {
     try {
       const token =
@@ -87,41 +90,59 @@ export function setupSocket(server: HttpServer) {
       socket.leave(`conv:${conversationId}`);
     });
 
-    socket.on(
-      "typing:start",
-      ({ conversationId }: { conversationId: string }) => {
-        socket
-          .to(`conv:${conversationId}`)
-          .emit("typing:start", { userId, conversationId });
-      }
-    );
+    socket.on("typing:start", ({ conversationId }: { conversationId: string }) => {
+      const key = `${userId}:${conversationId}`;
+      const existing = typingTimeouts.get(key);
+      if (existing) clearTimeout(existing);
+      socket.to(`conv:${conversationId}`).emit("typing:start", { userId, conversationId });
+      // Auto-stop if client disconnects or forgets to send stop
+      const timeout = setTimeout(() => {
+        socket.to(`conv:${conversationId}`).emit("typing:stop", { userId, conversationId });
+        typingTimeouts.delete(key);
+      }, 5000);
+      typingTimeouts.set(key, timeout);
+    });
 
-    socket.on(
-      "typing:stop",
-      ({ conversationId }: { conversationId: string }) => {
-        socket
-          .to(`conv:${conversationId}`)
-          .emit("typing:stop", { userId, conversationId });
-      }
-    );
+    socket.on("typing:stop", ({ conversationId }: { conversationId: string }) => {
+      const key = `${userId}:${conversationId}`;
+      const existing = typingTimeouts.get(key);
+      if (existing) { clearTimeout(existing); typingTimeouts.delete(key); }
+      socket.to(`conv:${conversationId}`).emit("typing:stop", { userId, conversationId });
+    });
 
-    socket.on(
-      "message:read",
-      async ({ messageId }: { messageId: string }) => {
-        await db
-          .insert(messageStatus)
+    socket.on("message:read", async ({ messageId, conversationId }: { messageId: string; conversationId?: string }) => {
+      try {
+        await db.insert(messageStatus)
           .values({ messageId, userId, status: "read" })
           .onConflictDoUpdate({
             target: [messageStatus.messageId, messageStatus.userId],
             set: { status: "read", updatedAt: new Date() },
           });
+        // Notify sender that message was read
+        if (conversationId) {
+          const [msg] = await db.select({ senderId: messages.senderId })
+            .from(messages).where(eq(messages.id, messageId)).limit(1);
+          if (msg?.senderId && msg.senderId !== userId) {
+            socket.to(`conv:${conversationId}`).emit("message:read", { messageId, readBy: userId });
+          }
+        }
+      } catch (err) {
+        logger.error({ err }, "message:read socket error");
       }
-    );
+    });
 
     socket.on("disconnect", async () => {
       logger.info({ userId }, "Socket disconnected");
-      await db
-        .update(users)
+      // Clear all typing indicators for this user
+      for (const [key, timeout] of typingTimeouts.entries()) {
+        if (key.startsWith(`${userId}:`)) {
+          clearTimeout(timeout);
+          typingTimeouts.delete(key);
+          const convId = key.split(":")[1];
+          socket.broadcast.emit("typing:stop", { userId, conversationId: convId });
+        }
+      }
+      await db.update(users)
         .set({ isOnline: false, lastSeenAt: new Date() })
         .where(eq(users.id, userId));
       socket.broadcast.emit("user:offline", { userId, lastSeenAt: new Date().toISOString() });
@@ -135,24 +156,26 @@ export function getIO(): SocketServer {
   return io;
 }
 
-export async function broadcastMessage(
-  conversationId: string,
-  message: Record<string, unknown>
-) {
-  if (io) {
-    io.to(`conv:${conversationId}`).emit("message:new", message);
-  }
+export async function broadcastMessage(conversationId: string, message: Record<string, unknown>) {
+  if (io) io.to(`conv:${conversationId}`).emit("message:new", message);
 }
 
-export async function notifyUser(
-  userId: string,
-  notification: Record<string, unknown>
-) {
+export async function broadcastMessageUpdate(conversationId: string, message: Record<string, unknown>) {
+  if (io) io.to(`conv:${conversationId}`).emit("message:updated", message);
+}
+
+export async function broadcastMessageDeleted(conversationId: string, messageId: string) {
+  if (io) io.to(`conv:${conversationId}`).emit("message:deleted", { messageId, conversationId });
+}
+
+export async function broadcastReaction(conversationId: string, data: Record<string, unknown>) {
+  if (io) io.to(`conv:${conversationId}`).emit("message:reaction", data);
+}
+
+export async function notifyUser(userId: string, notification: Record<string, unknown>) {
   if (io) {
     const sockets = await io.fetchSockets();
-    const userSockets = sockets.filter(
-      (s) => (s as unknown as AuthSocket).userId === userId
-    );
+    const userSockets = sockets.filter((s) => (s as unknown as AuthSocket).userId === userId);
     userSockets.forEach((s) => s.emit("notification:new", notification));
   }
 }

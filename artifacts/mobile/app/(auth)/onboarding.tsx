@@ -36,7 +36,7 @@ export default function OnboardingScreen() {
     updateMe.mutate(
       { data: body },
       {
-        onSuccess: (data) => {
+        onSuccess: (data: unknown) => {
           updateUser(data as Parameters<typeof updateUser>[0]);
           router.replace("/(tabs)/chats");
         },

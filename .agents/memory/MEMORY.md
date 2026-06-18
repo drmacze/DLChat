@@ -1,0 +1,1 @@
+- [DLChat Architecture](dlchat-arch.md) — Expo+Express monorepo: real PostgreSQL, Twilio WhatsApp OTP, Socket.io realtime, all wired together

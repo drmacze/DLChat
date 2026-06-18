@@ -7,8 +7,9 @@ import {
   messages,
   users,
   blockedUsers,
+  messageStatus,
 } from "@workspace/db";
-import { eq, and, desc, isNull, sql, or } from "drizzle-orm";
+import { eq, and, desc, isNull, sql, or, gt } from "drizzle-orm";
 import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 import { broadcastMessage } from "../socket/index.js";
@@ -99,7 +100,22 @@ router.get("/", requireAuth, async (req: AuthRequest, res) => {
                 createdAt: lastMsg.msg.createdAt.toISOString(),
               }
             : null,
-          unreadCount: 0,
+          unreadCount: await (async () => {
+            const [{ count }] = await db
+              .select({ count: sql<number>`count(*)::int` })
+              .from(messages)
+              .where(
+                and(
+                  eq(messages.conversationId, conv.id),
+                  isNull(messages.deletedAt),
+                  sql`${messages.id} NOT IN (
+                    SELECT message_id FROM message_status
+                    WHERE user_id = ${req.userId!}::uuid AND status = 'read'
+                  )`
+                )
+              );
+            return count ?? 0;
+          })(),
           isPinned: !!member.pinnedAt,
           isMuted: !!(member.mutedUntil && member.mutedUntil > new Date()),
           otherUser,

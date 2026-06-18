@@ -37,7 +37,7 @@ export default function SettingsScreen() {
     updateMe.mutate(
       { data: { displayName: displayName.trim(), username: username.trim() || undefined, bio: bio.trim() || undefined, privacyReadReceipts: readReceipts } },
       {
-        onSuccess: (data) => {
+        onSuccess: (data: unknown) => {
           updateUser(data as Parameters<typeof updateUser>[0]);
           setSaved(true);
           setTimeout(() => setSaved(false), 2000);

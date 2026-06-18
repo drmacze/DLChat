@@ -8,11 +8,13 @@ import {
   messageReactions,
   messageStatus,
   conversations,
+  pushTokens,
 } from "@workspace/db";
-import { eq, and, desc, isNull, lt, sql } from "drizzle-orm";
+import { eq, and, desc, isNull, lt, inArray, sql } from "drizzle-orm";
 import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
-import { broadcastMessage } from "../socket/index.js";
+import { broadcastMessage, getIO } from "../socket/index.js";
+import { sendPushToUsers } from "../lib/pushNotifications.js";
 
 const router = Router({ mergeParams: true });
 
@@ -39,7 +41,10 @@ async function isMember(conversationId: string, userId: string) {
 }
 
 async function buildMessageOutput(msg: typeof messages.$inferSelect, userId: string) {
-  const [sender] = await db.select().from(users).where(eq(users.id, msg.senderId!)).limit(1);
+  const [sender] = msg.senderId
+    ? await db.select().from(users).where(eq(users.id, msg.senderId)).limit(1)
+    : [null];
+
   const reactions = await db
     .select()
     .from(messageReactions)
@@ -62,8 +67,9 @@ async function buildMessageOutput(msg: typeof messages.$inferSelect, userId: str
     if (replyMsg) {
       replyTo = {
         id: replyMsg.msg.id,
-        content: replyMsg.msg.content,
+        content: replyMsg.msg.deletedAt ? null : replyMsg.msg.content,
         type: replyMsg.msg.type,
+        mediaUrl: replyMsg.msg.mediaUrl,
         senderName: replyMsg.u.displayName,
         createdAt: replyMsg.msg.createdAt.toISOString(),
       };
@@ -79,14 +85,14 @@ async function buildMessageOutput(msg: typeof messages.$inferSelect, userId: str
     conversationId: msg.conversationId,
     senderId: msg.senderId,
     type: msg.type,
-    content: msg.content,
-    mediaUrl: msg.mediaUrl,
+    content: msg.deletedAt ? null : msg.content,
+    mediaUrl: msg.deletedAt ? null : msg.mediaUrl,
     replyToMessageId: msg.replyToMessageId,
     replyTo,
     editedAt: msg.editedAt?.toISOString() ?? null,
     deletedAt: msg.deletedAt?.toISOString() ?? null,
     createdAt: msg.createdAt.toISOString(),
-    sender: sender ? userPublic(sender) : { id: "", displayName: "Deleted User", isOnline: false, role: "user" as const },
+    sender: sender ? userPublic(sender) : { id: "", displayName: "Deleted User", isOnline: false, role: "user" as const, username: null, bio: null, avatarUrl: null, lastSeenAt: null },
     reactions: Object.values(reactionMap),
     status: status?.status ?? null,
   };
@@ -161,6 +167,58 @@ router.post("/:conversationId/messages", requireAuth, async (req: AuthRequest, r
 
     const output = await buildMessageOutput(msg, req.userId!);
     broadcastMessage(convId, output);
+
+    // Mark as read for sender
+    await db.insert(messageStatus)
+      .values({ messageId: msg.id, userId: req.userId!, status: "read" })
+      .onConflictDoNothing();
+
+    // Notify other members via push notification
+    setImmediate(async () => {
+      try {
+        const members = await db
+          .select({ userId: conversationMembers.userId })
+          .from(conversationMembers)
+          .where(and(
+            eq(conversationMembers.conversationId, convId),
+            sql`${conversationMembers.userId} != ${req.userId!}::uuid`
+          ));
+
+        const otherUserIds = members.map((m) => m.userId);
+        if (otherUserIds.length === 0) return;
+
+        // Get online socket users to skip push for them
+        const io = getIO();
+        let onlineUserIds = new Set<string>();
+        if (io) {
+          const sockets = await io.fetchSockets();
+          onlineUserIds = new Set(sockets.map((s: any) => s.userId).filter(Boolean));
+        }
+
+        const offlineUserIds = otherUserIds.filter((id) => !onlineUserIds.has(id));
+        if (offlineUserIds.length === 0) return;
+
+        const tokenRows = await db
+          .select({ token: pushTokens.token })
+          .from(pushTokens)
+          .where(inArray(pushTokens.userId, offlineUserIds));
+
+        const tokens = tokenRows.map((r) => r.token);
+        if (tokens.length === 0) return;
+
+        const senderName = output.sender.displayName;
+        const preview = body.type !== "text" ? `[${body.type}]` : (body.content?.slice(0, 100) ?? "");
+
+        await sendPushToUsers(tokens, senderName, preview, {
+          type: "message",
+          conversationId: convId,
+          messageId: msg.id,
+        });
+      } catch (err) {
+        logger.error({ err }, "Push notification error");
+      }
+    });
+
     res.json(output);
   } catch (err) {
     logger.error({ err }, "Send message error");

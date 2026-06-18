@@ -35,8 +35,8 @@ export default function SearchScreen() {
     createDirect.mutate(
       { data: { targetUserId: userId } },
       {
-        onSuccess: (data) => {
-          router.replace(`/chat/${data.id}`);
+        onSuccess: (data: unknown) => {
+          router.replace(`/chat/${(data as { id: string }).id}`);
         },
       }
     );
