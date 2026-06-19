@@ -4,12 +4,13 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
-import { createAIPersona, generateAIResponse, getDefaultPersonas, type AIPersona, type AIMood, type AICountry, type AIGender } from "../lib/aiEngine.js";
+import { createAIPersona, getDefaultPersonas, type AIPersona, type AIMood, type AICountry, type AIGender } from "../lib/aiEngine.js";
+import { getGroqClient, buildSystemPrompt, shiftMood, GROQ_MODEL } from "../lib/groqClient.js";
 
 const router = Router();
 
 const personaCache = new Map<string, AIPersona>();
-const historyCache = new Map<string, Array<{ role: "user" | "ai"; content: string }>>();
+const historyCache = new Map<string, Array<{ role: "user" | "assistant"; content: string }>>();
 
 function ck(userId: string, aiId: string) { return `${userId}:${aiId}`; }
 
@@ -96,6 +97,7 @@ router.post("/contacts/:aiId/messages", requireAuth, async (req: AuthRequest, re
     const userId = req.userId!;
     const key = ck(userId, aiId);
 
+    // ── Load persona ──────────────────────────────────────────────────────────
     let persona = personaCache.get(key);
     if (!persona) {
       const rows = await db.execute(sql`SELECT persona_json FROM ai_contacts WHERE id = ${aiId} AND user_id = ${userId}::uuid`);
@@ -104,36 +106,69 @@ router.post("/contacts/:aiId/messages", requireAuth, async (req: AuthRequest, re
       personaCache.set(key, persona);
     }
 
+    // ── Load / seed history ───────────────────────────────────────────────────
     if (!historyCache.has(key)) {
       const rows = await db.execute(sql`
         SELECT role, content FROM ai_messages WHERE user_id = ${userId}::uuid AND ai_contact_id = ${aiId}
-        ORDER BY created_at DESC LIMIT 20
+        ORDER BY created_at DESC LIMIT 30
       `);
-      historyCache.set(key, rows.rows.reverse().map((r: Record<string, unknown>) => ({ role: r.role as "user" | "ai", content: r.content as string })));
+      historyCache.set(key, rows.rows.reverse().map((r: Record<string, unknown>) => ({
+        role: (r.role === "ai" ? "assistant" : "user") as "user" | "assistant",
+        content: r.content as string,
+      })));
     }
 
     const history = historyCache.get(key)!;
 
+    // ── Save user message ─────────────────────────────────────────────────────
     const userMsgId = crypto.randomUUID();
     await db.execute(sql`
       INSERT INTO ai_messages (id, user_id, ai_contact_id, role, content, mood, created_at)
       VALUES (${userMsgId}, ${userId}::uuid, ${aiId}, 'user', ${content}, 'happy', now())
     `);
+
+    // ── Call Groq ─────────────────────────────────────────────────────────────
+    const groqMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      { role: "system", content: buildSystemPrompt(persona) },
+      ...history,
+      { role: "user", content },
+    ];
+
+    const groq = getGroqClient();
+    const completion = await groq.chat.completions.create({
+      model: GROQ_MODEL,
+      messages: groqMessages,
+      max_tokens: 280,
+      temperature: 0.85,
+      top_p: 0.9,
+    });
+
+    const aiContent = completion.choices[0]?.message?.content?.trim() ?? "hmm~";
+
+    // ── Update history cache (keep last 30 turns) ─────────────────────────────
     history.push({ role: "user", content });
+    history.push({ role: "assistant", content: aiContent });
+    if (history.length > 60) history.splice(0, history.length - 60);
 
-    const { content: aiContent, newMood, typingMs } = generateAIResponse(history, persona, content);
+    // ── Mood shift (12% chance) ───────────────────────────────────────────────
+    const newMood: AIMood = Math.random() < 0.12
+      ? shiftMood(persona.mood as AIMood)
+      : persona.mood as AIMood;
 
-    persona.mood = newMood as AIMood;
+    persona.mood = newMood;
     personaCache.set(key, persona);
     await db.execute(sql`UPDATE ai_contacts SET persona_json = ${JSON.stringify(persona)}, updated_at = now() WHERE id = ${aiId} AND user_id = ${userId}::uuid`);
 
+    // ── Save AI message ───────────────────────────────────────────────────────
     const aiMsgId = crypto.randomUUID();
     await db.execute(sql`
       INSERT INTO ai_messages (id, user_id, ai_contact_id, role, content, mood, created_at)
       VALUES (${aiMsgId}, ${userId}::uuid, ${aiId}, 'ai', ${aiContent}, ${newMood}, now())
     `);
-    history.push({ role: "ai", content: aiContent });
-    if (history.length > 40) history.splice(0, history.length - 40);
+
+    // ── Typing simulation (based on response length) ──────────────────────────
+    const words = aiContent.split(/\s+/).length;
+    const typingMs = Math.min(words * 45 + Math.random() * 400, 3500);
 
     res.json({
       userMessage: { id: userMsgId, role: "user", content, createdAt: new Date().toISOString() },
