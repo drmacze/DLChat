@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View, Text, StyleSheet, Image, TouchableOpacity, Animated,
-  Dimensions, ActivityIndicator, Alert, Platform,
+  Dimensions, ActivityIndicator, Alert, Platform, Modal,
+  FlatList, ScrollView,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -13,6 +14,11 @@ import { BASE_URL } from "@/utils/api";
 
 const { width } = Dimensions.get("window");
 const STORY_DURATION = 5000;
+
+interface Viewer {
+  viewedAt: string;
+  user: { id: string; displayName: string; avatarUrl?: string | null; username?: string | null };
+}
 
 interface Story {
   id: string;
@@ -35,20 +41,118 @@ interface StoryGroup {
 
 function getTimeAgo(iso: string): string {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60) return "Baru saja";
-  if (diff < 3600) return `${Math.floor(diff / 60)} mnt lalu`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} jam lalu`;
-  return `${Math.floor(diff / 86400)} hr lalu`;
+  if (diff < 60) return "Just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
 }
+
+function ViewersModal({
+  visible,
+  storyId,
+  onClose,
+  token,
+}: {
+  visible: boolean;
+  storyId: string;
+  onClose: () => void;
+  token: string | null;
+}) {
+  const { c } = useTheme();
+  const insets = useSafeAreaInsets();
+  const [viewers, setViewers] = useState<Viewer[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!visible || !storyId || !token) return;
+    setLoading(true);
+    fetch(`${BASE_URL}/api/stories/${storyId}/viewers`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.json())
+      .then((d) => setViewers(d.viewers ?? []))
+      .catch(() => Alert.alert("Error", "Could not load viewers."))
+      .finally(() => setLoading(false));
+  }, [visible, storyId, token]);
+
+  return (
+    <Modal
+      transparent
+      animationType="slide"
+      visible={visible}
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <View style={vStyles.backdrop}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} activeOpacity={1} />
+        <View style={[vStyles.sheet, { backgroundColor: c.surface }]}>
+          <View style={[vStyles.handle, { backgroundColor: c.border }]} />
+          <View style={[vStyles.header, { borderBottomColor: c.border }]}>
+            <Text style={[vStyles.title, { color: c.foreground }]}>
+              {loading ? "Loading…" : `${viewers.length} Viewer${viewers.length !== 1 ? "s" : ""}`}
+            </Text>
+            <TouchableOpacity onPress={onClose}>
+              <Feather name="x" size={20} color={c.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+          {loading ? (
+            <ActivityIndicator color={c.primary} style={{ margin: 40 }} />
+          ) : viewers.length === 0 ? (
+            <View style={vStyles.empty}>
+              <Feather name="eye-off" size={40} color={c.border} />
+              <Text style={[vStyles.emptyText, { color: c.mutedForeground }]}>No one has viewed this story yet</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={viewers}
+              keyExtractor={(item, i) => `${item.user.id}-${i}`}
+              contentContainerStyle={{ paddingVertical: 8, paddingBottom: insets.bottom + 16 }}
+              renderItem={({ item }) => (
+                <View style={vStyles.row}>
+                  <Avatar uri={item.user.avatarUrl} name={item.user.displayName} size={42} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[vStyles.name, { color: c.foreground }]}>{item.user.displayName}</Text>
+                    {item.user.username && (
+                      <Text style={[vStyles.userHandle, { color: c.mutedForeground }]}>@{item.user.username}</Text>
+                    )}
+                  </View>
+                  <Text style={[vStyles.time, { color: c.mutedForeground }]}>{getTimeAgo(item.viewedAt)}</Text>
+                </View>
+              )}
+            />
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const vStyles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: "65%", minHeight: "35%" },
+  handle: { width: 38, height: 4, borderRadius: 2, alignSelf: "center", marginTop: 10, marginBottom: 2 },
+  header: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  title: { fontSize: 15, fontWeight: "700", fontFamily: "Inter_700Bold" },
+  empty: { alignItems: "center", gap: 12, paddingVertical: 48 },
+  emptyText: { fontSize: 14, fontFamily: "Inter_400Regular" },
+  row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, gap: 12 },
+  name: { fontSize: 14, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
+  userHandle: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  time: { fontSize: 12, fontFamily: "Inter_400Regular" },
+});
 
 export default function StoryViewerScreen() {
   const { userId } = useLocalSearchParams<{ userId: string }>();
   const insets = useSafeAreaInsets();
   const { c } = useTheme();
-  const { token } = useAuth();
+  const { token, user: me } = useAuth();
   const [group, setGroup] = useState<StoryGroup | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [viewersOpen, setViewersOpen] = useState(false);
   const progress = useRef(new Animated.Value(0)).current;
   const progressAnim = useRef<Animated.CompositeAnimation | null>(null);
 
@@ -60,7 +164,7 @@ export default function StoryViewerScreen() {
         const found = (d.stories as StoryGroup[])?.find((g) => g.user.id === userId);
         setGroup(found ?? null);
       })
-      .catch(() => Alert.alert("Error", "Tidak dapat memuat story."))
+      .catch(() => Alert.alert("Error", "Could not load story."))
       .finally(() => setLoading(false));
   }, [token, userId]);
 
@@ -114,15 +218,16 @@ export default function StoryViewerScreen() {
   if (!group || group.stories.length === 0) {
     return (
       <View style={[styles.container, { backgroundColor: "#000", justifyContent: "center", alignItems: "center" }]}>
-        <Text style={{ color: "#fff" }}>Story tidak tersedia</Text>
+        <Text style={{ color: "#fff" }}>Story not available</Text>
         <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16 }}>
-          <Text style={{ color: "#aaa" }}>Kembali</Text>
+          <Text style={{ color: "#aaa" }}>Go back</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
   const story = group.stories[currentIndex];
+  const isOwner = me?.id === story.author.id;
 
   return (
     <View style={[styles.container, { backgroundColor: story.backgroundColor ?? "#000" }]}>
@@ -164,14 +269,35 @@ export default function StoryViewerScreen() {
         </View>
       ) : null}
 
-      <View style={styles.footer}>
-        <Text style={styles.viewCount}>
-          <Feather name="eye" size={13} color="rgba(255,255,255,0.7)" /> {story.viewCount} dilihat
-        </Text>
+      <View style={[styles.footer, { paddingBottom: Platform.OS === "web" ? 24 : insets.bottom + 16 }]}>
+        {isOwner ? (
+          <TouchableOpacity
+            style={styles.viewerBtn}
+            onPress={() => setViewersOpen(true)}
+            activeOpacity={0.8}
+          >
+            <Feather name="eye" size={15} color="rgba(255,255,255,0.9)" />
+            <Text style={styles.viewCountText}>{story.viewCount} viewer{story.viewCount !== 1 ? "s" : ""}</Text>
+            <Feather name="chevron-up" size={14} color="rgba(255,255,255,0.7)" />
+          </TouchableOpacity>
+        ) : (
+          <Text style={styles.viewCountAlt}>
+            {story.viewCount} {story.viewCount === 1 ? "view" : "views"}
+          </Text>
+        )}
       </View>
 
       <TouchableOpacity style={styles.tapLeft} onPress={goBack} activeOpacity={1} />
       <TouchableOpacity style={styles.tapRight} onPress={advanceStory} activeOpacity={1} />
+
+      {isOwner && (
+        <ViewersModal
+          visible={viewersOpen}
+          storyId={story.id}
+          onClose={() => setViewersOpen(false)}
+          token={token}
+        />
+      )}
     </View>
   );
 }
@@ -190,9 +316,20 @@ const styles = StyleSheet.create({
     position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     alignItems: "center", justifyContent: "center", padding: 32,
   },
-  storyText: { color: "#fff", fontSize: 24, fontWeight: "700", textAlign: "center", fontFamily: "Inter_700Bold", textShadowColor: "rgba(0,0,0,0.5)", textShadowRadius: 10, textShadowOffset: { width: 0, height: 1 } },
-  footer: { position: "absolute", bottom: 30, left: 0, right: 0, alignItems: "center" },
-  viewCount: { color: "rgba(255,255,255,0.7)", fontSize: 13, fontFamily: "Inter_400Regular" },
+  storyText: {
+    color: "#fff", fontSize: 24, fontWeight: "700", textAlign: "center",
+    fontFamily: "Inter_700Bold",
+    textShadowColor: "rgba(0,0,0,0.5)", textShadowRadius: 10,
+    textShadowOffset: { width: 0, height: 1 },
+  },
+  footer: { position: "absolute", bottom: 0, left: 0, right: 0, alignItems: "center" },
+  viewerBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "rgba(0,0,0,0.4)", borderRadius: 20,
+    paddingHorizontal: 16, paddingVertical: 8,
+  },
+  viewCountText: { color: "rgba(255,255,255,0.9)", fontSize: 13, fontFamily: "Inter_500Medium" },
+  viewCountAlt: { color: "rgba(255,255,255,0.7)", fontSize: 13, fontFamily: "Inter_400Regular" },
   tapLeft: { position: "absolute", left: 0, top: 0, bottom: 0, width: "35%" },
   tapRight: { position: "absolute", right: 0, top: 0, bottom: 0, width: "50%" },
 });

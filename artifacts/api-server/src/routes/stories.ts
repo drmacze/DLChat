@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod/v4";
 import { db } from "@workspace/db";
 import { stories, storyViews, users, contacts } from "@workspace/db";
-import { eq, and, isNull, gt, sql } from "drizzle-orm";
+import { eq, and, isNull, gt, sql, desc } from "drizzle-orm";
 import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 
@@ -131,6 +131,35 @@ router.post("/:storyId/view", requireAuth, async (req: AuthRequest, res) => {
     res.json({ success: true });
   } catch (err) {
     logger.error({ err }, "View story error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+router.get("/:storyId/viewers", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const [story] = await db
+      .select()
+      .from(stories)
+      .where(eq(stories.id, String(req.params.storyId)))
+      .limit(1);
+    if (!story) { res.status(404).json({ error: "Story not found" }); return; }
+    if (story.userId !== req.userId) { res.status(403).json({ error: "Forbidden" }); return; }
+
+    const rows = await db
+      .select({ view: storyViews, user: users })
+      .from(storyViews)
+      .innerJoin(users, eq(storyViews.viewerId, users.id))
+      .where(eq(storyViews.storyId, String(req.params.storyId)))
+      .orderBy(desc(storyViews.viewedAt));
+
+    res.json({
+      viewers: rows.map((r) => ({
+        viewedAt: r.view.viewedAt.toISOString(),
+        user: userPublic(r.user),
+      })),
+    });
+  } catch (err) {
+    logger.error({ err }, "Get story viewers error");
     res.status(500).json({ error: "Server error" });
   }
 });

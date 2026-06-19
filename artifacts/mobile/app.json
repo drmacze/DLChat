@@ -25,6 +25,7 @@
     },
     "android": {
       "package": "com.dlavie.chat",
+      "softwareKeyboardLayoutMode": "pan",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#0E1621"

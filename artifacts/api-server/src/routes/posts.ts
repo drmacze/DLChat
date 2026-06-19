@@ -194,6 +194,29 @@ router.post("/:postId/comments", requireAuth, async (req: AuthRequest, res) => {
   }
 });
 
+router.get("/:postId/comments", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const rows = await db
+      .select({ comment: postComments, user: users })
+      .from(postComments)
+      .innerJoin(users, eq(postComments.userId, users.id))
+      .where(and(eq(postComments.postId, String(req.params.postId)), isNull(postComments.deletedAt)))
+      .orderBy(postComments.createdAt)
+      .limit(100);
+    res.json({
+      comments: rows.map((r) => ({
+        id: r.comment.id,
+        content: r.comment.content,
+        createdAt: r.comment.createdAt.toISOString(),
+        author: userPublic(r.user),
+      })),
+    });
+  } catch (err) {
+    logger.error({ err }, "Get comments error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 router.delete("/:postId/comments/:commentId", requireAuth, async (req: AuthRequest, res) => {
   try {
     await db.update(postComments)

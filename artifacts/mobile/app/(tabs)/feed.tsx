@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, Platform,
@@ -9,6 +9,7 @@ import { useGetFeed, useLikePost, useUnlikePost } from "@workspace/api-client-re
 import { useQueryClient } from "@tanstack/react-query";
 import Reanimated, { FadeInDown } from "react-native-reanimated";
 import PostCard from "@/components/feed/PostCard";
+import CommentsSheet from "@/components/feed/CommentsSheet";
 import FloatingActionButton from "@/components/common/FloatingActionButton";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
@@ -26,6 +27,8 @@ export default function FeedScreen() {
   const likePost = useLikePost();
   const unlikePost = useUnlikePost();
   const posts = data?.posts ?? [];
+
+  const [commentingPost, setCommentingPost] = useState<{ id: string; count: number } | null>(null);
 
   const handleLike = (postId: string, isLiked: boolean) => {
     if (isLiked) {
@@ -69,7 +72,7 @@ export default function FeedScreen() {
               <PostCard
                 post={item as Parameters<typeof PostCard>[0]["post"]}
                 onLike={() => handleLike(item.id, item.isLikedByMe)}
-                onComment={() => {}}
+                onComment={() => setCommentingPost({ id: item.id, count: item.commentsCount })}
               />
             </Reanimated.View>
           )}
@@ -101,6 +104,13 @@ export default function FeedScreen() {
       <View style={[styles.fab, { bottom: Platform.OS === "web" ? 100 : insets.bottom + 20 }]}>
         <FloatingActionButton onPress={() => {}} icon="camera" size={56} />
       </View>
+
+      <CommentsSheet
+        postId={commentingPost?.id ?? null}
+        commentsCount={commentingPost?.count}
+        onClose={() => setCommentingPost(null)}
+        onCommentAdded={() => queryClient.invalidateQueries({ queryKey: ["feed"] })}
+      />
     </View>
   );
 }
