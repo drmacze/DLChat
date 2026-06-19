@@ -8,7 +8,12 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
-import { Audio } from "expo-av";
+import {
+  useAudioRecorder,
+  RecordingPresets,
+  setAudioModeAsync,
+  requestRecordingPermissionsAsync,
+} from "expo-audio";
 import { useTheme } from "@/context/ThemeContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BASE_URL } from "@/utils/api";
@@ -83,12 +88,12 @@ export default function MessageInput({
   const [mentionSuggestions, setMentionSuggestions] = useState<MentionMember[]>([]);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const recordingRef = useRef<Audio.Recording | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inputRef = useRef<TextInput>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  // Load draft on mount
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+
   useEffect(() => {
     const key = getDraftKey(conversationId);
     if (!key) return;
@@ -97,7 +102,6 @@ export default function MessageInput({
     });
   }, [conversationId]);
 
-  // Save draft on text change (debounced)
   const saveDraft = useCallback((val: string) => {
     const key = getDraftKey(conversationId);
     if (!key) return;
@@ -111,7 +115,6 @@ export default function MessageInput({
     }, 500);
   }, [conversationId]);
 
-  // Clear draft when message is sent
   const clearDraft = useCallback(() => {
     const key = getDraftKey(conversationId);
     if (key) AsyncStorage.removeItem(key);
@@ -196,7 +199,7 @@ export default function MessageInput({
     const asset = result.assets[0];
     const isVideo = asset.type === "video";
     let uri = asset.uri;
-    let mimeType = isVideo ? "video/mp4" : "image/jpeg";
+    const mimeType = isVideo ? "video/mp4" : "image/jpeg";
     const msgType = isVideo ? "video" : "image";
 
     setIsUploading(true);
@@ -241,16 +244,14 @@ export default function MessageInput({
 
   const startRecording = async () => {
     try {
-      const perm = await Audio.requestPermissionsAsync();
+      const perm = await requestRecordingPermissionsAsync();
       if (!perm.granted) {
         Alert.alert("Izin diperlukan", "Izinkan akses mikrofon untuk merekam pesan suara.");
         return;
       }
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-      recordingRef.current = recording;
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
       setIsRecording(true);
       setRecordingSecs(0);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
@@ -261,24 +262,21 @@ export default function MessageInput({
   };
 
   const stopRecordingAndSend = async () => {
-    if (!recordingRef.current) return;
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     setIsRecording(false);
     const duration = recordingSecs;
     setRecordingSecs(0);
 
     if (duration < 1) {
-      await recordingRef.current.stopAndUnloadAsync().catch(() => {});
-      recordingRef.current = null;
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+      try { await recorder.stop(); } catch {}
+      await setAudioModeAsync({ allowsRecording: false }).catch(() => {});
       return;
     }
 
     try {
-      await recordingRef.current.stopAndUnloadAsync();
-      const uri = recordingRef.current.getURI();
-      recordingRef.current = null;
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+      await recorder.stop();
+      const uri = recorder.uri;
+      await setAudioModeAsync({ allowsRecording: false }).catch(() => {});
       if (!uri) return;
       setIsUploading(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -288,18 +286,13 @@ export default function MessageInput({
       Alert.alert("Error", "Tidak dapat mengirim pesan suara.");
     } finally {
       setIsUploading(false);
-      recordingRef.current = null;
     }
   };
 
   const cancelRecording = async () => {
-    if (!recordingRef.current) return;
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-    try {
-      await recordingRef.current.stopAndUnloadAsync();
-    } catch {}
-    recordingRef.current = null;
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+    try { await recorder.stop(); } catch {}
+    await setAudioModeAsync({ allowsRecording: false }).catch(() => {});
     setIsRecording(false);
     setRecordingSecs(0);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -330,7 +323,6 @@ export default function MessageInput({
 
   return (
     <View style={[styles.outerContainer, { backgroundColor: c.sidebar as string, borderTopColor: c.border as string, paddingBottom: Math.max(insets.bottom, 8) }]}>
-      {/* Mentions autocomplete */}
       {mentionSuggestions.length > 0 && (
         <View style={[styles.mentionList, { backgroundColor: c.surface as string, borderColor: c.border as string }]}>
           {mentionSuggestions.map((m) => (
@@ -348,7 +340,6 @@ export default function MessageInput({
         </View>
       )}
 
-      {/* Reply bar slot */}
       {replyBar}
 
       <View style={styles.container}>

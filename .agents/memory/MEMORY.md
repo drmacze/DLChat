@@ -6,3 +6,5 @@
 - [DLChat SVG Icons & Storage](dlchat-icons-storage.md) — SvgIcons.tsx replaces all UI emojis; BASE_URL from utils/api.ts; App Storage wired at /api/storage/*; permanent domain via EXPO_PUBLIC_API_URL
 - [DLChat Auth Query Guard](dlchat-auth-query-guard.md) — all tab screen queries need enabled: !!token; Expo Router pre-renders tabs causing 401 without this guard
 - [DLChat Premium Features](dlchat-premium.md) — Full premium bundle: swipe-reply/quick-react in MessageBubble; drafts/mentions/camera/compress in MessageInput; archive filter + swipe in chats; bulk-delete + mute/archive/clear in chat screen
+- [DLChat expo-audio Migration](dlchat-expo-audio.md) — expo-av replaced by expo-audio; AudioPlayer uses useAudioPlayerStatus for reactive updates; AudioMode uses allowsRecording not allowsRecordingIOS
+- [DLChat Supabase Networking](dlchat-supabase-network.md) — Supabase PostgreSQL TCP port 5432 unreachable from Replit sandbox (ENOTFOUND); use Replit built-in DB. Supabase Storage (HTTPS/443) works fine.
