@@ -153,7 +153,7 @@ export function createAIPersona(country: AICountry, gender: AIGender): AIPersona
     id: `ai_${Date.now()}_${Math.floor(Math.random() * 9999)}`,
     name, country, gender, age, personality, avatarEmoji, mood,
     interests: pickRandom(interestSets),
-    typingSpeed: pickRandom(["fast", "normal", "normal", "slow"] as const[]),
+    typingSpeed: pickRandom(["fast", "normal", "normal", "slow"] as const),
     backstory: pickRandom(isID ? backstoriesID : backstoriesEN),
     quirk: pickRandom(isID ? quirksID : quirksEN),
     communicationStyle: pickRandom(isID ? communicationStylesID : communicationStylesEN),

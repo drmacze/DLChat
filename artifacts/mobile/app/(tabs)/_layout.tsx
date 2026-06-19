@@ -3,7 +3,7 @@ import { Tabs } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { MessageCircle, LayoutGrid, Users, User } from "lucide-react-native";
 import React from "react";
-import { Platform, StyleSheet, View } from "react-native";
+import { Platform, StyleSheet, View, type ColorValue } from "react-native";
 import { useTheme } from "@/context/ThemeContext";
 
 function TabIcon({
@@ -16,7 +16,7 @@ function TabIcon({
   icon: React.ReactNode;
   iosName: string;
   iosFocused: string;
-  color: string;
+  color: ColorValue;
   focused: boolean;
 }) {
   return (

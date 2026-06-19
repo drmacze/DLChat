@@ -47,7 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const logoutRef = useRef<() => Promise<void>>();
+  const logoutRef = useRef<() => Promise<void>>(undefined);
 
   const logout = async () => {
     await AsyncStorage.multiRemove(["auth_token", "auth_user"]);
