@@ -1,25 +1,29 @@
 import React, { useState } from "react";
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
-  ActivityIndicator, RefreshControl, Platform,
+  ActivityIndicator, RefreshControl, Platform, Alert,
 } from "react-native";
+import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Camera } from "lucide-react-native";
 import { useGetFeed, useLikePost, useUnlikePost } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import Reanimated, { FadeInDown } from "react-native-reanimated";
+import { Feather } from "@expo/vector-icons";
 import PostCard from "@/components/feed/PostCard";
 import CommentsSheet from "@/components/feed/CommentsSheet";
+import StoryBar from "@/components/stories/StoryBar";
 import FloatingActionButton from "@/components/common/FloatingActionButton";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
 import { CameraIcon } from "@/components/common/SvgIcons";
+import { BASE_URL } from "@/utils/api";
 
 export default function FeedScreen() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const queryClient = useQueryClient();
+
   const { data, isLoading, refetch, isRefetching } = useGetFeed(
     {},
     { query: { queryKey: ["feed"], enabled: !!token } },
@@ -27,6 +31,21 @@ export default function FeedScreen() {
   const likePost = useLikePost();
   const unlikePost = useUnlikePost();
   const posts = data?.posts ?? [];
+
+  const { data: storiesData } = useQuery({
+    queryKey: ["stories"],
+    queryFn: async () => {
+      const res = await fetch(`${BASE_URL}/api/stories`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return res.json();
+    },
+    enabled: !!token,
+  });
+  const storyGroups: Array<{
+    user: { id: string; displayName: string; avatarUrl?: string | null };
+    hasUnviewed: boolean;
+  }> = storiesData?.stories ?? [];
 
   const [commentingPost, setCommentingPost] = useState<{ id: string; count: number } | null>(null);
 
@@ -37,6 +56,25 @@ export default function FeedScreen() {
       likePost.mutate({ postId }, { onSuccess: () => queryClient.invalidateQueries({ queryKey: ["feed"] }) });
     }
   };
+
+  const handleFAB = () => {
+    Alert.alert("Buat Konten", "Mau buat apa?", [
+      {
+        text: "📝 Post",
+        onPress: () => router.push("/post/create"),
+      },
+      {
+        text: "📸 Story",
+        onPress: () => router.push("/story/create"),
+      },
+      { text: "Batal", style: "cancel" },
+    ]);
+  };
+
+  const TAB_BAR_HEIGHT = 49;
+  const fabBottom = Platform.OS === "web"
+    ? 100
+    : insets.bottom + TAB_BAR_HEIGHT + 16;
 
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
@@ -53,8 +91,10 @@ export default function FeedScreen() {
         <Text style={[styles.headerTitle, { color: c.foreground }]}>Feed</Text>
         <TouchableOpacity
           style={[styles.headerBtn, { backgroundColor: c.glass, borderColor: c.glassBorder }]}
+          onPress={() => router.push("/story/create")}
+          activeOpacity={0.7}
         >
-          <Camera size={18} color={c.mutedForeground} strokeWidth={1.8} />
+          <Feather name="camera" size={18} color={c.mutedForeground} />
         </TouchableOpacity>
       </View>
 
@@ -67,6 +107,16 @@ export default function FeedScreen() {
           data={posts}
           keyExtractor={(item) => item.id}
           decelerationRate="normal"
+          ListHeaderComponent={
+            (storyGroups.length > 0 || !!user) ? (
+              <StoryBar
+                stories={storyGroups}
+                myUser={user ? { id: user.id, displayName: user.displayName, avatarUrl: user.avatarUrl ?? null } : undefined}
+                onPress={(userId) => router.push(`/story/view/${userId}`)}
+                onAddStory={() => router.push("/story/create")}
+              />
+            ) : null
+          }
           renderItem={({ item, index }) => (
             <Reanimated.View entering={FadeInDown.delay(index * 55).springify().damping(18)}>
               <PostCard
@@ -79,16 +129,27 @@ export default function FeedScreen() {
           ListEmptyComponent={
             <View style={styles.empty}>
               <CameraIcon size={60} />
-              <Text style={[styles.emptyTitle, { color: c.foreground }]}>No posts yet</Text>
+              <Text style={[styles.emptyTitle, { color: c.foreground }]}>Belum ada post</Text>
               <Text style={[styles.emptySubtitle, { color: c.mutedForeground }]}>
-                Share your first moment with friends
+                Jadilah yang pertama berbagi momen!
               </Text>
+              <TouchableOpacity
+                style={[styles.emptyBtn, { backgroundColor: c.primary }]}
+                onPress={handleFAB}
+                activeOpacity={0.85}
+              >
+                <Feather name="plus" size={16} color="#fff" />
+                <Text style={styles.emptyBtnText}>Buat Post atau Story</Text>
+              </TouchableOpacity>
             </View>
           }
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}
-              onRefresh={refetch}
+              onRefresh={() => {
+                refetch();
+                queryClient.invalidateQueries({ queryKey: ["stories"] });
+              }}
               tintColor={c.primary}
               colors={[c.primary]}
             />
@@ -96,13 +157,13 @@ export default function FeedScreen() {
           contentContainerStyle={
             posts.length === 0
               ? { flex: 1 }
-              : { paddingBottom: Platform.OS === "web" ? 84 : insets.bottom + 80 }
+              : { paddingBottom: fabBottom + 60 }
           }
         />
       )}
 
-      <View style={[styles.fab, { bottom: Platform.OS === "web" ? 100 : insets.bottom + 20 }]}>
-        <FloatingActionButton onPress={() => {}} icon="camera" size={56} />
+      <View style={[styles.fab, { bottom: fabBottom }]}>
+        <FloatingActionButton onPress={handleFAB} icon="plus" size={56} />
       </View>
 
       <CommentsSheet
@@ -144,7 +205,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    gap: 12,
     paddingHorizontal: 40,
   },
   emptyTitle: { fontSize: 17, fontWeight: "700", fontFamily: "Inter_700Bold", marginTop: 10 },
@@ -154,5 +215,11 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     lineHeight: 21,
   },
+  emptyBtn: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 20, paddingVertical: 12,
+    borderRadius: 24, marginTop: 8,
+  },
+  emptyBtnText: { color: "#fff", fontSize: 14, fontFamily: "Inter_600SemiBold" },
   fab: { position: "absolute", right: 20 },
 });

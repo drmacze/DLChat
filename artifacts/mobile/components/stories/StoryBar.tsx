@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import Avatar from "@/components/common/Avatar";
-import colors from "@/constants/colors";
+import { useTheme } from "@/context/ThemeContext";
 
 interface StoryBarProps {
   stories: Array<{
@@ -10,43 +10,70 @@ interface StoryBarProps {
   }>;
   onPress: (userId: string) => void;
   onAddStory?: () => void;
-  myUser?: { displayName: string; avatarUrl?: string | null };
+  myUser?: { id: string; displayName: string; avatarUrl?: string | null };
 }
 
 export default function StoryBar({ stories, onPress, onAddStory, myUser }: StoryBarProps) {
-  const c = colors.dark;
+  const { c } = useTheme();
+
+  const myStory = stories.find((s) => s.user.id === myUser?.id);
 
   return (
-    <View style={[styles.container, { backgroundColor: c.sidebar, borderBottomColor: c.border }]}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+    <View style={[styles.container, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.scroll}
+      >
         {myUser && (
           <TouchableOpacity style={styles.item} onPress={onAddStory} activeOpacity={0.7}>
-            <View style={[styles.ring, { borderColor: "transparent" }]}>
-              <Avatar uri={myUser.avatarUrl} name={myUser.displayName} size={56} />
-              <View style={[styles.addBadge, { backgroundColor: c.primary }]}>
-                <Text style={styles.addPlus}>+</Text>
-              </View>
+            <View
+              style={[
+                styles.ring,
+                {
+                  borderColor: myStory ? c.primary : "transparent",
+                  backgroundColor: c.background,
+                },
+              ]}
+            >
+              <Avatar uri={myUser.avatarUrl} name={myUser.displayName} size={52} />
+              {!myStory && (
+                <View style={[styles.addBadge, { backgroundColor: c.primary }]}>
+                  <Text style={styles.addPlus}>+</Text>
+                </View>
+              )}
             </View>
             <Text style={[styles.name, { color: c.mutedForeground }]} numberOfLines={1}>
               My Story
             </Text>
           </TouchableOpacity>
         )}
-        {stories.map(({ user, hasUnviewed }) => (
-          <TouchableOpacity key={user.id} style={styles.item} onPress={() => onPress(user.id)} activeOpacity={0.7}>
-            <View
-              style={[
-                styles.ring,
-                { borderColor: hasUnviewed ? c.primary : c.border },
-              ]}
+
+        {stories
+          .filter((s) => s.user.id !== myUser?.id)
+          .map(({ user, hasUnviewed }) => (
+            <TouchableOpacity
+              key={user.id}
+              style={styles.item}
+              onPress={() => onPress(user.id)}
+              activeOpacity={0.7}
             >
-              <Avatar uri={user.avatarUrl} name={user.displayName} size={52} />
-            </View>
-            <Text style={[styles.name, { color: c.mutedForeground }]} numberOfLines={1}>
-              {user.displayName.split(" ")[0]}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              <View
+                style={[
+                  styles.ring,
+                  {
+                    borderColor: hasUnviewed ? c.primary : c.border,
+                    backgroundColor: c.background,
+                  },
+                ]}
+              >
+                <Avatar uri={user.avatarUrl} name={user.displayName} size={52} />
+              </View>
+              <Text style={[styles.name, { color: c.mutedForeground }]} numberOfLines={1}>
+                {user.displayName.split(" ")[0]}
+              </Text>
+            </TouchableOpacity>
+          ))}
       </ScrollView>
     </View>
   );
@@ -57,20 +84,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   scroll: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    gap: 14,
+    gap: 12,
   },
   item: {
     alignItems: "center",
-    gap: 4,
-    width: 68,
+    gap: 5,
+    width: 66,
   },
   ring: {
     width: 62,
     height: 62,
     borderRadius: 31,
-    borderWidth: 2,
+    borderWidth: 2.5,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -82,8 +109,8 @@ const styles = StyleSheet.create({
   },
   addBadge: {
     position: "absolute",
-    bottom: 0,
-    right: 0,
+    bottom: -1,
+    right: -1,
     width: 20,
     height: 20,
     borderRadius: 10,
@@ -92,7 +119,7 @@ const styles = StyleSheet.create({
   },
   addPlus: {
     color: "#fff",
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "700",
     lineHeight: 20,
   },

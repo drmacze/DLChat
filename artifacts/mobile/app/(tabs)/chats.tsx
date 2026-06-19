@@ -210,7 +210,7 @@ export default function ChatsScreen() {
         />
       )}
 
-      <View style={[styles.fab, { bottom: Platform.OS === "web" ? 100 : insets.bottom + 20 }]}>
+      <View style={[styles.fab, { bottom: Platform.OS === "web" ? 100 : insets.bottom + 65 }]}>
         <FloatingActionButton onPress={() => router.push("/search")} icon="edit" size={56} />
       </View>
 

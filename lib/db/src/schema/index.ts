@@ -131,6 +131,7 @@ export const conversations = pgTable("conversations", {
   avatarUrl: text("avatar_url"),
   createdBy: uuid("created_by").references(() => users.id),
   isPublic: boolean("is_public").notNull().default(false),
+  disappearTimer: integer("disappear_timer").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
 });
@@ -168,6 +169,7 @@ export const messages = pgTable("messages", {
   forwardedFromMessageId: uuid("forwarded_from_message_id"),
   editedAt: timestamp("edited_at", { withTimezone: true }),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
 });
 
@@ -232,6 +234,22 @@ export const storyViews = pgTable(
   (t) => [unique().on(t.storyId, t.viewerId)]
 );
 
+export const storyReactions = pgTable(
+  "story_reactions",
+  {
+    id: uuid("id").primaryKey().default(d),
+    storyId: uuid("story_id")
+      .notNull()
+      .references(() => stories.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    emoji: text("emoji").notNull().default("heart"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (t) => [unique().on(t.storyId, t.userId)]
+);
+
 export const posts = pgTable("posts", {
   id: uuid("id").primaryKey().default(d),
   userId: uuid("user_id")
@@ -271,6 +289,47 @@ export const postComments = pgTable("post_comments", {
   content: text("content").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+export const polls = pgTable("polls", {
+  id: uuid("id").primaryKey().default(d),
+  conversationId: uuid("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  question: text("question").notNull(),
+  options: text("options").notNull(),
+  isMultiple: boolean("is_multiple").notNull().default(false),
+  isAnonymous: boolean("is_anonymous").notNull().default(false),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+});
+
+export const pollVotes = pgTable(
+  "poll_votes",
+  {
+    id: uuid("id").primaryKey().default(d),
+    pollId: uuid("poll_id")
+      .notNull()
+      .references(() => polls.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    optionIndex: integer("option_index").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (t) => [unique().on(t.pollId, t.userId, t.optionIndex)]
+);
+
+export const savedMessages = pgTable("saved_messages", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  conversationId: uuid("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
 });
 
 export const notifications = pgTable("notifications", {

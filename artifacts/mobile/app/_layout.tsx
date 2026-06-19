@@ -127,6 +127,7 @@ function RootLayoutNav() {
       <Stack.Screen name="call/[conversationId]" options={{ presentation: "fullScreenModal", headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="story/create" options={{ presentation: "modal", headerShown: false }} />
       <Stack.Screen name="story/view/[userId]" options={{ presentation: "fullScreenModal", headerShown: false, gestureEnabled: false }} />
+      <Stack.Screen name="post/create" options={{ presentation: "modal", headerShown: false }} />
     </Stack>
   );
 }

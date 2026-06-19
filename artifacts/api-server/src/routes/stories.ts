@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod/v4";
 import { db } from "@workspace/db";
-import { stories, storyViews, users, contacts } from "@workspace/db";
+import { stories, storyViews, storyReactions, users, contacts } from "@workspace/db";
 import { eq, and, isNull, gt, sql, desc } from "drizzle-orm";
 import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
@@ -32,6 +32,15 @@ async function buildStory(story: typeof stories.$inferSelect, userId: string) {
     .from(storyViews)
     .where(and(eq(storyViews.storyId, story.id), eq(storyViews.viewerId, userId)))
     .limit(1);
+  const [reactionsRow] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(storyReactions)
+    .where(eq(storyReactions.storyId, story.id));
+  const [myReaction] = await db
+    .select()
+    .from(storyReactions)
+    .where(and(eq(storyReactions.storyId, story.id), eq(storyReactions.userId, userId)))
+    .limit(1);
 
   return {
     id: story.id,
@@ -44,6 +53,9 @@ async function buildStory(story: typeof stories.$inferSelect, userId: string) {
     createdAt: story.createdAt.toISOString(),
     viewCount: viewsRow?.count ?? 0,
     isViewedByMe: !!myView,
+    reactionCount: reactionsRow?.count ?? 0,
+    isReactedByMe: !!myReaction,
+    myReactionEmoji: myReaction?.emoji ?? null,
     author: author ? userPublic(author) : { id: "", displayName: "Unknown", isOnline: false, role: "user" as const },
   };
 }
@@ -131,6 +143,40 @@ router.post("/:storyId/view", requireAuth, async (req: AuthRequest, res) => {
     res.json({ success: true });
   } catch (err) {
     logger.error({ err }, "View story error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+router.post("/:storyId/react", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const { emoji } = z.object({ emoji: z.string().default("heart") }).parse(req.body);
+    const storyId = String(req.params.storyId);
+    const [story] = await db.select().from(stories).where(eq(stories.id, storyId)).limit(1);
+    if (!story) { res.status(404).json({ error: "Story not found" }); return; }
+
+    await db
+      .insert(storyReactions)
+      .values({ storyId, userId: req.userId!, emoji })
+      .onConflictDoUpdate({
+        target: [storyReactions.storyId, storyReactions.userId],
+        set: { emoji },
+      });
+    res.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, "React to story error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+router.delete("/:storyId/react", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const storyId = String(req.params.storyId);
+    await db.delete(storyReactions).where(
+      and(eq(storyReactions.storyId, storyId), eq(storyReactions.userId, req.userId!))
+    );
+    res.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, "Unreact to story error");
     res.status(500).json({ error: "Server error" });
   }
 });

@@ -15,6 +15,7 @@ import aiRouter from "./ai.js";
 import streakRouter from "./streak.js";
 import botRouter from "./bot.js";
 import storageRouter from "./storage.js";
+import pollsRouter from "./polls.js";
 
 const router: IRouter = Router();
 
@@ -34,6 +35,7 @@ router.use("/ai", aiRouter);
 router.use("/streak", streakRouter);
 router.use("/bot", botRouter);
 router.use(storageRouter);
+router.use("/polls", pollsRouter);
 router.use("/", reportsRouter);
 
 export default router;

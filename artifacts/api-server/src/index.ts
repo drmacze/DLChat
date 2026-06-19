@@ -310,6 +310,49 @@ async function runMigrations() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         PRIMARY KEY (user_id, message_id)
       );
+
+      -- Phase 2: New features (2025-06)
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS disappear_timer INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+
+      CREATE TABLE IF NOT EXISTS story_reactions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        story_id UUID NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        emoji TEXT NOT NULL DEFAULT 'heart',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE(story_id, user_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS polls (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        created_by UUID NOT NULL REFERENCES users(id),
+        question TEXT NOT NULL,
+        options TEXT NOT NULL,
+        is_multiple BOOLEAN NOT NULL DEFAULT false,
+        is_anonymous BOOLEAN NOT NULL DEFAULT false,
+        closed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS poll_votes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        poll_id UUID NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        option_index INTEGER NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE(poll_id, user_id, option_index)
+      );
+
+      CREATE TABLE IF NOT EXISTS saved_messages (
+        user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_story_reactions_story ON story_reactions(story_id);
+      CREATE INDEX IF NOT EXISTS idx_polls_conv ON polls(conversation_id);
+      CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes(poll_id);
     `);
     logger.info("Database schema initialized");
   } catch (err) {
