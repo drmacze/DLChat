@@ -1,19 +1,41 @@
-import { createClient } from "@supabase/supabase-js";
+import { Storage } from "@google-cloud/storage";
+import { randomUUID } from "crypto";
 
-const SUPABASE_URL = process.env["SUPABASE_URL"];
-const SUPABASE_SERVICE_ROLE_KEY = process.env["SUPABASE_SERVICE_ROLE_KEY"];
-const SUPABASE_STORAGE_BUCKET = process.env["SUPABASE_STORAGE_BUCKET"] || "dlavie-chat";
+const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
-function getSupabaseClient() {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+const storageClient = new Storage({
+  credentials: {
+    audience: "replit",
+    subject_token_type: "access_token",
+    token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
+    type: "external_account",
+    credential_source: {
+      url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
+      format: {
+        type: "json",
+        subject_token_field_name: "access_token",
+      },
+    },
+    universe_domain: "googleapis.com",
+  },
+  projectId: "",
+});
+
+function getPublicBucketAndPrefix(): { bucketName: string; prefix: string } {
+  const searchPaths = process.env["PUBLIC_OBJECT_SEARCH_PATHS"];
+  if (!searchPaths) {
     throw {
       status: 503,
       message:
-        "Storage provider is not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.",
+        "Storage provider is not configured. Please provision Replit Object Storage (PUBLIC_OBJECT_SEARCH_PATHS not set).",
       code: "STORAGE_NOT_CONFIGURED",
     };
   }
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const firstPath = searchPaths.split(",")[0].trim();
+  const parts = firstPath.replace(/^\//, "").split("/");
+  const bucketName = parts[0];
+  const prefix = parts.slice(1).join("/");
+  return { bucketName, prefix };
 }
 
 export async function uploadFile(
@@ -22,27 +44,17 @@ export async function uploadFile(
   mimeType: string,
   folder: string = "uploads"
 ): Promise<string> {
-  const client = getSupabaseClient();
-  const path = `${folder}/${Date.now()}-${fileName}`;
+  const { bucketName, prefix } = getPublicBucketAndPrefix();
+  const basePath = prefix ? `${prefix}/${folder}` : folder;
+  const objectName = `${basePath}/${Date.now()}-${randomUUID()}-${fileName}`;
+  const bucket = storageClient.bucket(bucketName);
+  const file = bucket.file(objectName);
 
-  const { error } = await client.storage
-    .from(SUPABASE_STORAGE_BUCKET)
-    .upload(path, buffer, {
-      contentType: mimeType,
-      upsert: false,
-    });
+  await file.save(buffer, {
+    metadata: { contentType: mimeType },
+  });
 
-  if (error) {
-    throw {
-      status: 500,
-      message: `Storage upload failed: ${error.message}`,
-      code: "STORAGE_UPLOAD_FAILED",
-    };
-  }
+  await file.makePublic();
 
-  const { data } = client.storage
-    .from(SUPABASE_STORAGE_BUCKET)
-    .getPublicUrl(path);
-
-  return data.publicUrl;
+  return `https://storage.googleapis.com/${bucketName}/${objectName}`;
 }
