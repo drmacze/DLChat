@@ -82,10 +82,12 @@ router.post("/register", authLimiter, async (req, res) => {
       })
       .returning();
 
-    const token = signToken({ userId: user.id, sessionId: crypto.randomUUID() });
+    const sessionId = crypto.randomUUID();
+    const token = signToken({ userId: user.id, sessionId });
     const tokenHash = hashToken(token);
 
     await db.insert(sessions).values({
+      id: sessionId,
       userId: user.id,
       tokenHash,
       deviceName: req.headers["user-agent"]?.substring(0, 100),
@@ -124,10 +126,12 @@ router.post("/login", authLimiter, async (req, res) => {
       return;
     }
 
-    const token = signToken({ userId: user.id, sessionId: crypto.randomUUID() });
+    const sessionId = crypto.randomUUID();
+    const token = signToken({ userId: user.id, sessionId });
     const tokenHash = hashToken(token);
 
     await db.insert(sessions).values({
+      id: sessionId,
       userId: user.id,
       tokenHash,
       deviceName: req.headers["user-agent"]?.substring(0, 100),
