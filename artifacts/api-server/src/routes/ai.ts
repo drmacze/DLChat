@@ -4,8 +4,8 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
-import { createAIPersona, getDefaultPersonas, type AIPersona, type AIMood, type AICountry, type AIGender } from "../lib/aiEngine.js";
-import { getGroqClient, buildSystemPrompt, shiftMood, GROQ_MODEL } from "../lib/groqClient.js";
+import { createAIPersona, getDefaultPersonas, shiftMoodFromContext, type AIPersona, type AIMood, type AICountry, type AIGender } from "../lib/aiEngine.js";
+import { getGroqClient, buildSystemPrompt, GROQ_MODEL } from "../lib/groqClient.js";
 
 const router = Router();
 
@@ -150,10 +150,8 @@ router.post("/contacts/:aiId/messages", requireAuth, async (req: AuthRequest, re
     history.push({ role: "assistant", content: aiContent });
     if (history.length > 60) history.splice(0, history.length - 60);
 
-    // ── Mood shift (12% chance) ───────────────────────────────────────────────
-    const newMood: AIMood = Math.random() < 0.12
-      ? shiftMood(persona.mood as AIMood)
-      : persona.mood as AIMood;
+    // ── Context-aware mood shift ──────────────────────────────────────────────
+    const newMood: AIMood = shiftMoodFromContext(persona.mood as AIMood, content, history.length);
 
     persona.mood = newMood;
     personaCache.set(key, persona);

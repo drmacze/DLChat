@@ -1,4 +1,4 @@
-export type AIMood = "happy" | "chill" | "playful" | "flirty" | "sad" | "excited" | "tired" | "sarcastic";
+export type AIMood = "happy" | "chill" | "playful" | "flirty" | "sad" | "excited" | "tired" | "sarcastic" | "empathetic" | "distracted";
 export type AIGender = "male" | "female";
 export type AICountry = "id" | "us" | "sg" | "jp" | "in" | "br" | "de" | "uk";
 
@@ -13,6 +13,9 @@ export interface AIPersona {
   mood: AIMood;
   interests: string[];
   typingSpeed: "fast" | "normal" | "slow";
+  backstory?: string;
+  quirk?: string;
+  communicationStyle?: string;
 }
 
 // ─── Persona Data ──────────────────────────────────────────────────────────────
@@ -79,6 +82,63 @@ function pickUnique<T>(arr: T[], exclude: T[]): T {
   return pickRandom(filtered);
 }
 
+const backstoriesID = [
+  "Lagi semester akhir, sibuk ngerjain skripsi tapi sering prokrastinasi",
+  "Baru lulus kuliah, masih ngirim-ngirim lamaran kerja sambil freelance",
+  "Kerja part-time di café sambil kuliah, capek tapi enjoy",
+  "Gap year dulu, lagi cari tahu maunya apa sambil ngonten",
+  "Fresh grad yang baru mulai kerja bulan lalu, masih adaptasi",
+  "Mahasiswa rantau di kos kecil, masak sendiri biar hemat",
+  "Kerja remote dari rumah, kadang suka bosen tapi bebas",
+  "Lagi persiapan ujian masuk S2, stres tapi tetap dijalani",
+];
+
+const backstoriesEN = [
+  "Recently graduated, figuring out life while applying for jobs",
+  "Works part-time at a coffee shop while finishing university",
+  "Took a gap year to travel and find direction, just got back",
+  "New to the city after moving out from parents' place",
+  "Remote worker, enjoys the freedom but misses office vibes sometimes",
+  "Final year student, balancing thesis and social life (barely)",
+];
+
+const quirksID = [
+  "Kalau lagi mikir, suka ngirim '...' dulu sebelum beneran balas",
+  "Sering balas singkat dulu terus disambung lagi di pesan berikutnya",
+  "Typo-an, sering langsung koreksi sendiri di pesan kedua",
+  "Suka bilang 'btw' buat ganti topik secara alami",
+  "Kadang baca dulu lama baru balas, tapi kalau udah balas panjang",
+  "Suka pakai tanda tanya di akhir kalimat biar ngobrolnya lanjut",
+  "Sering pakai '...' untuk jeda dramatis kecil",
+  "Kalau excited, sering ngirim pesan berkali-kali dalam satu waktu",
+];
+
+const quirksEN = [
+  "Tends to send a short reply first, then follow up with more",
+  "Often self-corrects typos in the very next message",
+  "Uses '...' when thinking before saying something real",
+  "Deflects with humor when the topic gets too serious",
+  "Asks follow-up questions almost every time they reply",
+  "Sometimes goes quiet mid-convo then comes back with 'sorry got distracted'",
+];
+
+const communicationStylesID = [
+  "Ekspresif, suka pake caps buat hal yang bikin excited",
+  "Singkat dan langsung, ga suka basa-basi yang panjang",
+  "Storyteller, suka kasih konteks dulu baru ke poin utamanya",
+  "Banyak nanya balik, lebih suka dengerin daripada dominasi obrolan",
+  "Santai dan mengalir, jarang maksa topik tertentu",
+  "Cenderung serius di awal tapi cepat mencair kalau udah nyaman",
+];
+
+const communicationStylesEN = [
+  "Direct but warm — says what they mean without sugarcoating",
+  "Good listener, asks lots of follow-up questions",
+  "Casual storyteller, gives context before the main point",
+  "Short replies at first, opens up gradually",
+  "Uses humor to connect, gets real when it matters",
+];
+
 export function createAIPersona(country: AICountry, gender: AIGender): AIPersona {
   const names = namesByCountry[country][gender];
   const name = pickRandom(names);
@@ -88,11 +148,15 @@ export function createAIPersona(country: AICountry, gender: AIGender): AIPersona
   const emojisFemale = ["👧", "🙋‍♀️", "💁‍♀️", "🌸", "✨", "🫶", "🌺", "🦋"];
   const avatarEmoji = pickRandom(gender === "male" ? emojisMale : emojisFemale);
   const mood = pickRandom(moodWeights);
+  const isID = country === "id";
   return {
     id: `ai_${Date.now()}_${Math.floor(Math.random() * 9999)}`,
     name, country, gender, age, personality, avatarEmoji, mood,
     interests: pickRandom(interestSets),
     typingSpeed: pickRandom(["fast", "normal", "normal", "slow"] as const[]),
+    backstory: pickRandom(isID ? backstoriesID : backstoriesEN),
+    quirk: pickRandom(isID ? quirksID : quirksEN),
+    communicationStyle: pickRandom(isID ? communicationStylesID : communicationStylesEN),
   };
 }
 
@@ -1200,16 +1264,39 @@ function getContextHints(history: Array<{ role: string; content: string }>): { t
 
 function getMoodShift(current: AIMood): AIMood {
   const shifts: Record<AIMood, AIMood[]> = {
-    happy: ["happy", "happy", "playful", "excited", "chill"],
-    chill: ["chill", "chill", "happy", "playful", "tired"],
-    playful: ["playful", "happy", "flirty", "chill", "playful"],
-    flirty: ["flirty", "playful", "happy", "chill", "flirty"],
-    sad: ["sad", "chill", "tired", "happy"],
-    excited: ["excited", "happy", "playful", "chill"],
-    tired: ["tired", "chill", "sad", "happy"],
-    sarcastic: ["sarcastic", "chill", "playful", "happy"],
+    happy:      ["happy", "happy", "playful", "excited", "chill"],
+    chill:      ["chill", "chill", "happy", "playful", "distracted"],
+    playful:    ["playful", "happy", "flirty", "chill", "playful"],
+    flirty:     ["flirty", "playful", "happy", "chill", "flirty"],
+    sad:        ["sad", "empathetic", "chill", "tired"],
+    excited:    ["excited", "happy", "playful", "chill"],
+    tired:      ["tired", "chill", "distracted", "happy"],
+    sarcastic:  ["sarcastic", "chill", "playful", "happy"],
+    empathetic: ["empathetic", "chill", "happy", "sad"],
+    distracted: ["distracted", "chill", "tired", "happy"],
   };
-  return pickRandom(shifts[current]);
+  return pickRandom(shifts[current] ?? ["chill"]);
+}
+
+export function shiftMoodFromContext(current: AIMood, userMessage: string, historyLength: number): AIMood {
+  const t = userMessage.toLowerCase();
+
+  // Context-driven — react to what the user is saying
+  const userIsSad = /sedih|galau|nangis|hancur|lelah|burnout|down|capek banget|ga kuat|hopeless|worthless|menangis|patah hati|gagal|kecewa|stress|overwhelm|sad|cry|tired of|feel bad|awful|rough/.test(t);
+  const userIsExcited = /yes+|yay+|asik+|seru+|yes+!|mantap|amazing|wohoo|literally|omg|excited|seneng banget|happy banget|finally|berhasil|dapet|gila bagus/.test(t);
+  const userIsLaughing = /wkwk|haha|lol|🤣|😂|lucu|ngakak|deadass|💀|dying/.test(t);
+  const userIsVenting = /curhat|cerita nih|sebenernya|jujur|pengen bilang|ga tau harus|bingung|helppp|tolong|bantuin/.test(t);
+  const userIsFlirting = /kamu lucu|kamu ganteng|kamu cantik|kamu baik|suka kamu|you're cute|you're sweet|miss you|kangen/.test(t);
+  const conversationIsDeep = historyLength > 10;
+
+  if (userIsSad || userIsVenting) return "empathetic";
+  if (userIsFlirting && conversationIsDeep) return "flirty";
+  if (userIsLaughing) return pickRandom(["playful", "happy"]);
+  if (userIsExcited) return pickRandom(["excited", "happy"]);
+
+  // Small random drift otherwise — only 8% chance to shift at all
+  if (Math.random() < 0.08) return getMoodShift(current);
+  return current;
 }
 
 // ─── Main Response Generator ───────────────────────────────────────────────────
