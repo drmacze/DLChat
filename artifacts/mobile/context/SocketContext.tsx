@@ -41,6 +41,7 @@ interface SocketContextValue {
   messageQueue: QueuedMessage[];
   enqueueMessage: (msg: QueuedMessage) => void;
   removeFromQueue: (tempId: string) => void;
+  onlineUsers: Set<string>;
 }
 
 const SocketContext = createContext<SocketContextValue>({
@@ -60,6 +61,7 @@ const SocketContext = createContext<SocketContextValue>({
   messageQueue: [],
   enqueueMessage: () => {},
   removeFromQueue: () => {},
+  onlineUsers: new Set(),
 });
 
 export function SocketProvider({ children }: { children: React.ReactNode }) {
@@ -70,6 +72,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [reconnectCount, setReconnectCount] = useState(0);
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const startHeartbeat = useCallback((sock: Socket) => {
@@ -130,6 +133,13 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     newSocket.on("call:incoming", (data: IncomingCall) => setIncomingCall(data));
     newSocket.on("call:ended", () => setIncomingCall(null));
     newSocket.on("call:rejected", () => setIncomingCall(null));
+
+    newSocket.on("user:online", ({ userId }: { userId: string }) => {
+      setOnlineUsers((prev) => { const next = new Set(prev); next.add(userId); return next; });
+    });
+    newSocket.on("user:offline", ({ userId }: { userId: string }) => {
+      setOnlineUsers((prev) => { const next = new Set(prev); next.delete(userId); return next; });
+    });
 
     socketRef.current = newSocket;
     setSocket(newSocket);
@@ -205,6 +215,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         initiateCall, acceptCall, rejectCall, endCall,
         incomingCall, clearIncomingCall,
         messageQueue, enqueueMessage, removeFromQueue,
+        onlineUsers,
       }}
     >
       {children}

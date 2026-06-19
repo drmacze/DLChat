@@ -243,6 +243,7 @@ export default function MessageInput({
   };
 
   const startRecording = async () => {
+    if (Platform.OS === "web") return;
     try {
       const perm = await requestRecordingPermissionsAsync();
       if (!perm.granted) {

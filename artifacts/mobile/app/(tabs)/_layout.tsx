@@ -63,9 +63,9 @@ export default function TabLayout() {
               tint={theme === "dark" ? "systemChromeMaterialDark" : "systemChromeMaterialLight"}
               style={StyleSheet.absoluteFill}
             />
-          ) : Platform.OS === "web" ? (
+          ) : (
             <View style={[StyleSheet.absoluteFill, { backgroundColor: c.tabBarBg }]} />
-          ) : null,
+          ),
       }}
     >
       <Tabs.Screen name="index" options={{ href: null }} />

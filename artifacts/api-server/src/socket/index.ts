@@ -71,8 +71,10 @@ export function setupSocket(server: HttpServer) {
     socket.broadcast.emit("user:online", { userId });
 
     // ── Application-level heartbeat ──────────────────────────────────────────
-    socket.on("ping", () => {
+    socket.on("ping", async () => {
       socket.emit("pong", { ts: Date.now() });
+      // Keep lastSeenAt fresh during active sessions (not just on disconnect)
+      await db.update(users).set({ lastSeenAt: new Date() }).where(eq(users.id, userId));
     });
 
     socket.on("conversation:join", async ({ conversationId }: { conversationId: string }) => {

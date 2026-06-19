@@ -71,7 +71,7 @@ export default function ChatRoomScreen() {
   const insets = useSafeAreaInsets();
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const { user } = useAuth();
-  const { socket, reconnectCount, joinConversation, leaveConversation, sendTyping, stopTyping, initiateCall } = useSocket();
+  const { socket, reconnectCount, joinConversation, leaveConversation, sendTyping, stopTyping, initiateCall, onlineUsers } = useSocket();
   const queryClient = useQueryClient();
   const sendMessage = useSendMessage();
 
@@ -163,6 +163,12 @@ export default function ChatRoomScreen() {
       setLocalMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, status: "read" } : m));
     };
 
+    const handleMessageDelivered = ({ messageId }: { messageId: string }) => {
+      setLocalMessages((prev) => prev.map((m) =>
+        m.id === messageId && (m.status === "sent" || !m.status) ? { ...m, status: "delivered" } : m
+      ));
+    };
+
     const handleTypingStart = ({ userId }: { userId: string }) => {
       if (userId !== user?.id) setTypingUsers((prev) => new Set([...prev, userId]));
     };
@@ -184,6 +190,7 @@ export default function ChatRoomScreen() {
     socket.on("message:deleted", handleMessageDeleted);
     socket.on("message:reaction", handleReaction);
     socket.on("message:read", handleMessageRead);
+    socket.on("message:delivered", handleMessageDelivered);
     socket.on("typing:start", handleTypingStart);
     socket.on("typing:stop", handleTypingStop);
     socket.on("message:pin", handlePin);
@@ -194,6 +201,7 @@ export default function ChatRoomScreen() {
       socket.off("message:deleted", handleMessageDeleted);
       socket.off("message:reaction", handleReaction);
       socket.off("message:read", handleMessageRead);
+      socket.off("message:delivered", handleMessageDelivered);
       socket.off("typing:start", handleTypingStart);
       socket.off("typing:stop", handleTypingStop);
       socket.off("message:pin", handlePin);
@@ -468,6 +476,10 @@ export default function ChatRoomScreen() {
     ? conv.members.find((m: { userId: string }) => m.userId !== user?.id)
     : null;
   const otherUser = otherMember?.user ?? null;
+  // Merge REST-fetched presence with real-time socket presence
+  const isOtherOnline = otherUser
+    ? (onlineUsers.has(otherUser.id) || otherUser.isOnline === true)
+    : false;
   const displayName = conv?.type === "direct"
     ? (otherUser?.displayName ?? "Chat")
     : (conv?.title ?? "Group Chat");
@@ -525,16 +537,16 @@ export default function ChatRoomScreen() {
               <Feather name="arrow-left" size={22} color={c.foreground} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.headerProfile} onPress={() => otherUser && router.push(`/profile/${otherUser.id}` as any)} activeOpacity={0.8}>
-              <Avatar uri={otherUser?.avatarUrl} name={displayName} size={36} isOnline={otherUser?.isOnline} />
+              <Avatar uri={otherUser?.avatarUrl} name={displayName} size={36} isOnline={isOtherOnline} />
               <View style={styles.headerInfo}>
                 <Text style={[styles.headerName, { color: c.foreground }]} numberOfLines={1}>{displayName}</Text>
                 <Text style={[styles.headerStatus, {
                   color: typingUsers.size > 0 ? c.primary
-                    : otherUser?.isOnline ? c.online
+                    : isOtherOnline ? c.online
                     : c.mutedForeground
                 }]} numberOfLines={1}>
                   {typingUsers.size > 0 ? "✏️ sedang mengetik..."
-                    : otherUser?.isOnline ? "● Online"
+                    : isOtherOnline ? "● Online"
                     : formatLastSeen(otherUser?.lastSeenAt)}
                 </Text>
               </View>
