@@ -15,10 +15,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { useUpdateMe } from "@workspace/api-client-react";
 import { useAuth } from "@/context/AuthContext";
-import colors from "@/constants/colors";
+import { useTheme } from "@/context/ThemeContext";
 
 export default function OnboardingScreen() {
-  const c = colors.dark;
+  const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const { updateUser } = useAuth();
   const [displayName, setDisplayName] = useState("");
@@ -55,7 +55,7 @@ export default function OnboardingScreen() {
       contentContainerStyle={[styles.container, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 20 }]}
       keyboardShouldPersistTaps="handled"
     >
-      <LinearGradient colors={["#2AABEE20", "transparent"]} style={styles.heroGradient} />
+      <LinearGradient colors={[c.primary + "22", "transparent"]} style={styles.heroGradient} />
       <View style={styles.icon}><WaveIcon size={52} /></View>
       <Text style={[styles.title, { color: c.foreground }]}>Set up profile</Text>
       <Text style={[styles.subtitle, { color: c.mutedForeground }]}>Let others know who you are</Text>
@@ -101,7 +101,7 @@ export default function OnboardingScreen() {
         disabled={updateMe.isPending}
         activeOpacity={0.8}
       >
-        <LinearGradient colors={["#2AABEE", "#1A8CC7"]} style={styles.btnGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+        <LinearGradient colors={c.primaryGradient} style={styles.btnGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
           {updateMe.isPending ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Get Started</Text>}
         </LinearGradient>
       </TouchableOpacity>
