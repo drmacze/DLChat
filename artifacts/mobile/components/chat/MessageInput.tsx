@@ -8,12 +8,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
-import {
-  useAudioRecorder,
-  RecordingPresets,
-  setAudioModeAsync,
-  requestRecordingPermissionsAsync,
-} from "expo-audio";
+import { Audio } from "expo-av";
 import { useTheme } from "@/context/ThemeContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BASE_URL } from "@/utils/api";
@@ -92,7 +87,7 @@ export default function MessageInput({
   const inputRef = useRef<TextInput>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recordingRef = React.useRef<Audio.Recording | null>(null);
 
   useEffect(() => {
     const key = getDraftKey(conversationId);
@@ -245,14 +240,14 @@ export default function MessageInput({
   const startRecording = async () => {
     if (Platform.OS === "web") return;
     try {
-      const perm = await requestRecordingPermissionsAsync();
+      const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) {
         Alert.alert("Izin diperlukan", "Izinkan akses mikrofon untuk merekam pesan suara.");
         return;
       }
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-      await recorder.prepareToRecordAsync();
-      recorder.record();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      recordingRef.current = recording;
       setIsRecording(true);
       setRecordingSecs(0);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
@@ -267,17 +262,19 @@ export default function MessageInput({
     setIsRecording(false);
     const duration = recordingSecs;
     setRecordingSecs(0);
+    const recording = recordingRef.current;
+    recordingRef.current = null;
 
     if (duration < 1) {
-      try { await recorder.stop(); } catch {}
-      await setAudioModeAsync({ allowsRecording: false }).catch(() => {});
+      try { await recording?.stopAndUnloadAsync(); } catch {}
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {});
       return;
     }
 
     try {
-      await recorder.stop();
-      const uri = recorder.uri;
-      await setAudioModeAsync({ allowsRecording: false }).catch(() => {});
+      await recording?.stopAndUnloadAsync();
+      const uri = recording?.getURI();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {});
       if (!uri) return;
       setIsUploading(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -292,8 +289,10 @@ export default function MessageInput({
 
   const cancelRecording = async () => {
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-    try { await recorder.stop(); } catch {}
-    await setAudioModeAsync({ allowsRecording: false }).catch(() => {});
+    const recording = recordingRef.current;
+    recordingRef.current = null;
+    try { await recording?.stopAndUnloadAsync(); } catch {}
+    await Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {});
     setIsRecording(false);
     setRecordingSecs(0);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

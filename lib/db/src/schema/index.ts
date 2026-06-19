@@ -385,6 +385,21 @@ export const otpCodes = pgTable("otp_codes", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
 });
 
+export const patchNotes = pgTable("patch_notes", {
+  id: uuid("id").primaryKey().default(d),
+  version: text("version").notNull(),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  isMajor: boolean("is_major").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+});
+
+export const appConfig = pgTable("app_config", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+});
+
 export const channelInvites = pgTable("channel_invites", {
   id: uuid("id").primaryKey().default(d),
   conversationId: uuid("conversation_id")

@@ -5,7 +5,7 @@ import {
 import { Swipeable } from "react-native-gesture-handler";
 import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
 import { useTheme } from "@/context/ThemeContext";
 import FormattedText from "./FormattedText";
@@ -57,19 +57,34 @@ function StatusIcon({ status, isMe }: { status?: string | null; isMe: boolean })
 }
 
 function VoicePlayer({ uri, isMe, c }: { uri: string; isMe: boolean; c: Record<string, unknown> }) {
-  const player = useAudioPlayer({ uri });
-  const status = useAudioPlayerStatus(player);
+  const soundRef = React.useRef<Audio.Sound | null>(null);
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const [position, setPosition] = React.useState(0);
+  const [duration, setDuration] = React.useState(0);
 
-  const progress = status.duration > 0 ? status.currentTime / status.duration : 0;
-  const durationSecs = status.duration ?? 0;
+  React.useEffect(() => {
+    let mounted = true;
+    Audio.Sound.createAsync({ uri }, {}, (status) => {
+      if (!mounted || !status.isLoaded) return;
+      setIsPlaying(status.isPlaying);
+      setPosition((status.positionMillis ?? 0) / 1000);
+      setDuration((status.durationMillis ?? 0) / 1000);
+      if (status.didJustFinish) { setIsPlaying(false); setPosition(0); }
+    }).then(({ sound }) => { if (mounted) soundRef.current = sound; });
+    return () => {
+      mounted = false;
+      soundRef.current?.unloadAsync().catch(() => {});
+    };
+  }, [uri]);
 
-  const togglePlay = () => {
+  const progress = duration > 0 ? position / duration : 0;
+  const durationSecs = duration;
+
+  const togglePlay = async () => {
     try {
-      if (status.playing) {
-        player.pause();
-      } else {
-        player.play();
-      }
+      if (!soundRef.current) return;
+      if (isPlaying) { await soundRef.current.pauseAsync(); }
+      else { await soundRef.current.playAsync(); }
     } catch {
       Alert.alert("Error", "Tidak dapat memutar audio.");
     }
@@ -86,7 +101,7 @@ function VoicePlayer({ uri, isMe, c }: { uri: string; isMe: boolean; c: Record<s
   return (
     <View style={styles.voicePlayer}>
       <TouchableOpacity onPress={togglePlay} style={[styles.voicePlayBtn, { backgroundColor: isMe ? "rgba(255,255,255,0.2)" : (c.surface as string) }]}>
-        <Feather name={status.playing ? "pause" : "play"} size={16} color={iconColor} />
+        <Feather name={isPlaying ? "pause" : "play"} size={16} color={iconColor} />
       </TouchableOpacity>
       <View style={styles.voiceWaveContainer}>
         <View style={[styles.voiceWaveBg, { backgroundColor: waveColor }]}>
