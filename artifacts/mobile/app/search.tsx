@@ -13,23 +13,46 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useSearchUsers, useCreateDirectConversation } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
 import Avatar from "@/components/common/Avatar";
-import colors from "@/constants/colors";
+import { useTheme } from "@/context/ThemeContext";
+import { useAuth } from "@/context/AuthContext";
+import { BASE_URL } from "@/utils/api";
+
+const TABS = ["Pengguna", "Pesan"] as const;
+type Tab = typeof TABS[number];
+
+async function searchMessages(q: string, token: string) {
+  const res = await fetch(`${BASE_URL}/api/messages/search?q=${encodeURIComponent(q)}&limit=30`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Search failed");
+  return res.json() as Promise<{ messages: Array<{ id: string; content: string; createdAt: string; conversationId: string; sender: { id: string; displayName: string; avatarUrl?: string } }> }>;
+}
 
 export default function SearchScreen() {
-  const c = colors.dark;
+  const { c } = useTheme();
+  const { token } = useAuth();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
+  const [activeTab, setActiveTab] = useState<Tab>("Pengguna");
   const createDirect = useCreateDirectConversation();
 
-  const { data, isLoading } = useSearchUsers({ q: query }, {
+  const { data: usersData, isLoading: usersLoading } = useSearchUsers({ q: query }, {
     query: {
       queryKey: ["search-users", query],
-      enabled: query.length >= 2,
+      enabled: query.length >= 2 && activeTab === "Pengguna",
     },
   });
 
-  const users = data?.users ?? [];
+  const { data: msgData, isLoading: msgLoading } = useQuery({
+    queryKey: ["search-messages", query],
+    queryFn: () => searchMessages(query, token!),
+    enabled: query.length >= 2 && activeTab === "Pesan" && !!token,
+  });
+
+  const users = usersData?.users ?? [];
+  const messages = msgData?.messages ?? [];
 
   const handleStartChat = (userId: string) => {
     createDirect.mutate(
@@ -42,18 +65,15 @@ export default function SearchScreen() {
     );
   };
 
+  const isLoading = activeTab === "Pengguna" ? usersLoading : msgLoading;
+
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
-      <View
-        style={[
-          styles.header,
-          {
-            backgroundColor: c.sidebar,
-            borderBottomColor: c.border,
-            paddingTop: Platform.OS === "web" ? 67 : insets.top + 8,
-          },
-        ]}
-      >
+      <View style={[styles.header, {
+        backgroundColor: c.headerBg,
+        borderBottomColor: c.border,
+        paddingTop: Platform.OS === "web" ? 67 : insets.top + 8,
+      }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Feather name="arrow-left" size={22} color={c.foreground} />
         </TouchableOpacity>
@@ -61,7 +81,7 @@ export default function SearchScreen() {
           <Feather name="search" size={16} color={c.mutedForeground} />
           <TextInput
             style={[styles.searchInput, { color: c.foreground }]}
-            placeholder="Search by name or username..."
+            placeholder={activeTab === "Pengguna" ? "Cari pengguna..." : "Cari pesan..."}
             placeholderTextColor={c.mutedForeground}
             value={query}
             onChangeText={setQuery}
@@ -76,14 +96,30 @@ export default function SearchScreen() {
         </View>
       </View>
 
+      <View style={[styles.tabs, { borderBottomColor: c.border }]}>
+        {TABS.map((tab) => (
+          <TouchableOpacity
+            key={tab}
+            onPress={() => setActiveTab(tab)}
+            style={[styles.tab, activeTab === tab && { borderBottomColor: c.primary, borderBottomWidth: 2 }]}
+          >
+            <Text style={[styles.tabText, { color: activeTab === tab ? c.primary : c.mutedForeground }]}>
+              {tab}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       {query.length < 2 ? (
         <View style={styles.hint}>
           <Feather name="search" size={40} color={c.mutedForeground} />
-          <Text style={[styles.hintText, { color: c.mutedForeground }]}>Search for users to chat</Text>
+          <Text style={[styles.hintText, { color: c.mutedForeground }]}>
+            {activeTab === "Pengguna" ? "Ketik nama atau username..." : "Ketik kata kunci pesan..."}
+          </Text>
         </View>
       ) : isLoading ? (
         <View style={styles.loading}><ActivityIndicator color={c.primary} /></View>
-      ) : (
+      ) : activeTab === "Pengguna" ? (
         <FlatList
           data={users}
           keyExtractor={(item) => item.id}
@@ -103,7 +139,35 @@ export default function SearchScreen() {
           )}
           ListEmptyComponent={
             <View style={styles.hint}>
-              <Text style={[styles.hintText, { color: c.mutedForeground }]}>No users found</Text>
+              <Text style={[styles.hintText, { color: c.mutedForeground }]}>Pengguna tidak ditemukan</Text>
+            </View>
+          }
+        />
+      ) : (
+        <FlatList
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[styles.result, { borderBottomColor: c.border }]}
+              onPress={() => router.push(`/chat/${item.conversationId}`)}
+              activeOpacity={0.7}
+            >
+              <Avatar uri={item.sender?.avatarUrl} name={item.sender?.displayName ?? "?"} size={46} />
+              <View style={styles.resultInfo}>
+                <Text style={[styles.resultName, { color: c.foreground }]} numberOfLines={1}>
+                  {item.sender?.displayName ?? "Pengguna"}
+                </Text>
+                <Text style={[styles.resultMsg, { color: c.mutedForeground }]} numberOfLines={2}>
+                  {item.content}
+                </Text>
+              </View>
+              <Feather name="arrow-right" size={16} color={c.mutedForeground} />
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <View style={styles.hint}>
+              <Text style={[styles.hintText, { color: c.mutedForeground }]}>Pesan tidak ditemukan</Text>
             </View>
           }
         />
@@ -134,6 +198,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   searchInput: { flex: 1, fontSize: 15, fontFamily: "Inter_400Regular" },
+  tabs: {
+    flexDirection: "row",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  tab: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  tabText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
   hint: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
   hintText: { fontSize: 15, fontFamily: "Inter_400Regular" },
   loading: { padding: 20, alignItems: "center" },
@@ -148,4 +224,5 @@ const styles = StyleSheet.create({
   resultInfo: { flex: 1 },
   resultName: { fontSize: 16, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
   resultHandle: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
+  resultMsg: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2, lineHeight: 18 },
 });

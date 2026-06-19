@@ -407,6 +407,27 @@ async function runMigrations() {
         last_message_at TIMESTAMPTZ NOT NULL,
         PRIMARY KEY (user_id, conversation_id)
       );
+
+      -- Feature pack: auto-reply
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_reply_enabled BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_reply_message TEXT;
+
+      -- Feature pack: post bookmarks
+      CREATE TABLE IF NOT EXISTS post_bookmarks (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE(user_id, post_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_post_bookmarks_user ON post_bookmarks(user_id);
+
+      -- Feature pack: two-step PIN
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_enabled BOOLEAN NOT NULL DEFAULT false;
+
+      -- Feature pack: message_status last_read
+      ALTER TABLE conversation_members ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMPTZ;
     `);
     logger.info("Database schema initialized");
   } catch (err) {

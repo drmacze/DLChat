@@ -1,8 +1,8 @@
-import React from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform } from "react-native";
+import React, { useState } from "react";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Share, Clipboard, Alert } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Settings, Bell, Bot, HelpCircle, ChevronRight, Pencil, Phone, LayoutDashboard } from "lucide-react-native";
+import { Settings, Bell, Bot, HelpCircle, ChevronRight, Pencil, Phone, LayoutDashboard, Bookmark, QrCode, Copy, Link } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useQuery } from "@tanstack/react-query";
 import Reanimated, { FadeInDown } from "react-native-reanimated";
@@ -13,6 +13,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
 import { FireIcon, TrophyIcon } from "@/components/common/SvgIcons";
 import { BASE_URL } from "@/utils/api";
+import { Feather } from "@expo/vector-icons";
 
 export default function ProfileScreen() {
   const { c } = useTheme();
@@ -41,11 +42,47 @@ export default function ProfileScreen() {
     enabled: !!token,
   });
 
+  const { data: statsData } = useQuery({
+    queryKey: ["me-stats"],
+    queryFn: async () => {
+      const res = await fetch(`${BASE_URL}/api/users/me/stats`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return res.json();
+    },
+    enabled: !!token,
+  });
+
+  const [shareVisible, setShareVisible] = useState(false);
+
   if (!user) return null;
 
   const streak = streakData?.currentStreak ?? 0;
   const longestStreak = streakData?.longestStreak ?? 0;
   const aiCount = aiData?.contacts?.length ?? 0;
+  const postsCount = statsData?.postsCount ?? 0;
+  const contactsCount = statsData?.contactsCount ?? 0;
+  const bookmarksCount = statsData?.bookmarksCount ?? 0;
+  const joinedAt = statsData?.joinedAt ? new Date(statsData.joinedAt) : null;
+  const joinedText = joinedAt
+    ? joinedAt.toLocaleDateString("id-ID", { month: "long", year: "numeric" })
+    : null;
+
+  const profileLink = user.username ? `https://dlchat.app/@${user.username}` : `https://dlchat.app/user/${user.id}`;
+
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        message: `Temukan aku di DLChat!\n${profileLink}`,
+        title: `Profil ${user.displayName}`,
+      });
+    } catch { /* cancelled */ }
+  };
+
+  const handleCopyLink = () => {
+    Clipboard.setString(profileLink);
+    Alert.alert("Tersalin!", "Link profil kamu sudah disalin ke clipboard.");
+  };
 
   const menuItems = [
     {
@@ -68,6 +105,13 @@ export default function ProfileScreen() {
       sublabel: "Chat with AI contacts anytime",
       color: c.accent,
       onPress: () => router.push("/(tabs)/contacts"),
+    },
+    {
+      icon: <Bookmark size={17} color={c.teal} strokeWidth={1.8} />,
+      label: "Post Tersimpan",
+      sublabel: `${bookmarksCount} post disimpan`,
+      color: c.teal,
+      onPress: () => {},
     },
     {
       icon: <HelpCircle size={17} color={c.success} strokeWidth={1.8} />,
@@ -113,14 +157,65 @@ export default function ProfileScreen() {
           {user.bio ? (
             <Text style={[styles.bio, { color: c.mutedForeground }]}>{user.bio}</Text>
           ) : null}
-          <TouchableOpacity
-            style={[styles.editBtn, { backgroundColor: c.glass, borderColor: c.glassBorder }]}
-            onPress={() => router.push("/settings")}
-            activeOpacity={0.7}
-          >
-            <Pencil size={13} color={c.foreground} strokeWidth={2} />
-            <Text style={[styles.editBtnText, { color: c.foreground }]}>Edit Profile</Text>
-          </TouchableOpacity>
+          {(user as any)?.statusText ? (
+            <Text style={[styles.statusText, { color: c.mutedForeground }]}>
+              {(user as any).statusText}
+            </Text>
+          ) : null}
+          {joinedText && (
+            <Text style={[styles.joinedText, { color: c.mutedForeground }]}>
+              Bergabung sejak {joinedText}
+            </Text>
+          )}
+          <View style={styles.heroBtns}>
+            <TouchableOpacity
+              style={[styles.editBtn, { backgroundColor: c.glass, borderColor: c.glassBorder }]}
+              onPress={() => router.push("/settings")}
+              activeOpacity={0.7}
+            >
+              <Pencil size={13} color={c.foreground} strokeWidth={2} />
+              <Text style={[styles.editBtnText, { color: c.foreground }]}>Edit Profil</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.shareBtn, { backgroundColor: c.glass, borderColor: c.glassBorder }]}
+              onPress={handleShare}
+              activeOpacity={0.7}
+            >
+              <Feather name="share-2" size={14} color={c.foreground} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.shareBtn, { backgroundColor: c.glass, borderColor: c.glassBorder }]}
+              onPress={handleCopyLink}
+              activeOpacity={0.7}
+            >
+              <Feather name="link" size={14} color={c.foreground} />
+            </TouchableOpacity>
+          </View>
+        </Reanimated.View>
+
+        {/* Stats bar */}
+        <Reanimated.View entering={FadeInDown.delay(50).springify().damping(20)}>
+          <View style={[styles.statsBar, { backgroundColor: c.glass, borderColor: c.glassBorder }]}>
+            <TouchableOpacity style={styles.statItem} onPress={() => router.push("/post/create" as any)}>
+              <Text style={[styles.statNum, { color: c.foreground }]}>{postsCount}</Text>
+              <Text style={[styles.statLabel, { color: c.mutedForeground }]}>Post</Text>
+            </TouchableOpacity>
+            <View style={[styles.statDiv, { backgroundColor: c.border }]} />
+            <TouchableOpacity style={styles.statItem} onPress={() => router.push("/(tabs)/contacts" as any)}>
+              <Text style={[styles.statNum, { color: c.foreground }]}>{contactsCount}</Text>
+              <Text style={[styles.statLabel, { color: c.mutedForeground }]}>Kontak</Text>
+            </TouchableOpacity>
+            <View style={[styles.statDiv, { backgroundColor: c.border }]} />
+            <TouchableOpacity style={styles.statItem} onPress={() => router.push("/(tabs)/contacts" as any)}>
+              <Text style={[styles.statNum, { color: c.foreground }]}>{aiCount}</Text>
+              <Text style={[styles.statLabel, { color: c.mutedForeground }]}>AI</Text>
+            </TouchableOpacity>
+            <View style={[styles.statDiv, { backgroundColor: c.border }]} />
+            <TouchableOpacity style={styles.statItem}>
+              <Text style={[styles.statNum, { color: c.foreground }]}>{bookmarksCount}</Text>
+              <Text style={[styles.statLabel, { color: c.mutedForeground }]}>Simpan</Text>
+            </TouchableOpacity>
+          </View>
         </Reanimated.View>
       </LinearGradient>
 
@@ -234,7 +329,22 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   heroGradient: { paddingBottom: 0 },
-  heroContent: { alignItems: "center", paddingHorizontal: 24, paddingBottom: 28, paddingTop: 28 },
+  heroContent: { alignItems: "center", paddingHorizontal: 24, paddingBottom: 20, paddingTop: 28 },
+  statusText: { fontSize: 14, fontFamily: "Inter_400Regular", marginTop: 4, textAlign: "center" },
+  joinedText: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 3, marginBottom: 12 },
+  heroBtns: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12 },
+  shareBtn: {
+    width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  statsBar: {
+    flexDirection: "row", marginHorizontal: 18, marginTop: 0, marginBottom: 14,
+    borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 14,
+  },
+  statItem: { flex: 1, alignItems: "center" },
+  statNum: { fontSize: 20, fontWeight: "700", fontFamily: "Inter_700Bold" },
+  statLabel: { fontSize: 11, fontFamily: "Inter_400Regular", marginTop: 2 },
+  statDiv: { width: StyleSheet.hairlineWidth, height: 32, alignSelf: "center" },
   avatarWrapper: { position: "relative", marginBottom: 4 },
   streakBadgePos: { position: "absolute", bottom: -4, right: -10 },
   name: {

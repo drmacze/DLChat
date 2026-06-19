@@ -12,6 +12,7 @@ import { Audio } from "expo-av";
 import { useTheme } from "@/context/ThemeContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BASE_URL } from "@/utils/api";
+import CreatePollModal from "./CreatePollModal";
 
 interface MentionMember {
   id: string;
@@ -80,6 +81,7 @@ export default function MessageInput({
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSecs, setRecordingSecs] = useState(0);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [showPollModal, setShowPollModal] = useState(false);
   const [mentionSuggestions, setMentionSuggestions] = useState<MentionMember[]>([]);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -342,6 +344,14 @@ export default function MessageInput({
 
       {replyBar}
 
+      {conversationId && (
+        <CreatePollModal
+          visible={showPollModal}
+          conversationId={conversationId}
+          onClose={() => setShowPollModal(false)}
+          onCreated={(_pollId: string) => { setShowPollModal(false); }}
+        />
+      )}
       <View style={styles.container}>
         <View style={[styles.inputRow, { backgroundColor: c.surface as string }]}>
           <TouchableOpacity
@@ -361,6 +371,17 @@ export default function MessageInput({
           >
             <Feather name={isUploading ? "loader" : "image"} size={20} color={isUploading ? c.primary as string : c.mutedForeground as string} />
           </TouchableOpacity>
+
+          {conversationId && (
+            <TouchableOpacity
+              style={styles.attachBtn}
+              onPress={() => setShowPollModal(true)}
+              disabled={isUploading}
+              activeOpacity={0.7}
+            >
+              <Feather name="bar-chart-2" size={20} color={c.mutedForeground as string} />
+            </TouchableOpacity>
+          )}
 
           <TextInput
             ref={inputRef}

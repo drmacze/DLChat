@@ -48,6 +48,7 @@ export default function FeedScreen() {
   }> = storiesData?.stories ?? [];
 
   const [commentingPost, setCommentingPost] = useState<{ id: string; count: number } | null>(null);
+  const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set());
 
   const handleLike = (postId: string, isLiked: boolean) => {
     if (isLiked) {
@@ -120,9 +121,19 @@ export default function FeedScreen() {
           renderItem={({ item, index }) => (
             <Reanimated.View entering={FadeInDown.delay(index * 55).springify().damping(18)}>
               <PostCard
-                post={item as Parameters<typeof PostCard>[0]["post"]}
+                post={{
+                  ...(item as any),
+                  isBookmarked: bookmarkedIds.has(item.id) || (item as any).isBookmarked,
+                }}
                 onLike={() => handleLike(item.id, item.isLikedByMe)}
                 onComment={() => setCommentingPost({ id: item.id, count: item.commentsCount })}
+                onBookmarkChange={(postId, bm) => {
+                  setBookmarkedIds((prev) => {
+                    const next = new Set(prev);
+                    if (bm) next.add(postId); else next.delete(postId);
+                    return next;
+                  });
+                }}
               />
             </Reanimated.View>
           )}

@@ -70,22 +70,35 @@ router.patch("/me", requireAuth, async (req: AuthRequest, res) => {
         displayName: z.string().min(1).max(60).optional(),
         username: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_]+$/).optional(),
         bio: z.string().max(200).optional(),
-        statusText: z.string().max(100).optional(),
+        statusText: z.string().max(150).optional(),
         avatarUrl: z.string().url().optional(),
         phoneNumber: z.string().min(7).max(20).nullable().optional(),
         privacyLastSeen: z.enum(["everyone", "contacts", "nobody"]).optional(),
         privacyProfilePhoto: z.enum(["everyone", "contacts", "nobody"]).optional(),
         privacyReadReceipts: z.boolean().optional(),
+        autoReplyEnabled: z.boolean().optional(),
+        autoReplyMessage: z.string().max(500).nullable().optional(),
       })
       .parse(req.body);
 
+    const { autoReplyEnabled, autoReplyMessage, ...ormFields } = body;
+
     const [updated] = await db
       .update(users)
-      .set({ ...body, updatedAt: new Date() })
+      .set({ ...ormFields, updatedAt: new Date() })
       .where(eq(users.id, req.userId!))
       .returning();
 
-    res.json(userPublic(updated));
+    if (autoReplyEnabled !== undefined || autoReplyMessage !== undefined) {
+      await db.execute(sql`
+        UPDATE users SET
+          auto_reply_enabled = COALESCE(${autoReplyEnabled ?? null}::boolean, auto_reply_enabled),
+          auto_reply_message = COALESCE(${autoReplyMessage ?? null}, auto_reply_message)
+        WHERE id = ${req.userId!}::uuid
+      `);
+    }
+
+    res.json({ ...userPublic(updated), autoReplyEnabled: autoReplyEnabled ?? updated.autoReplyEnabled ?? false });
   } catch (err) {
     if (err instanceof z.ZodError) {
       res.status(400).json({ error: "Invalid data", details: err.issues });
@@ -93,6 +106,22 @@ router.patch("/me", requireAuth, async (req: AuthRequest, res) => {
     }
     logger.error({ err }, "Update user error");
     res.status(500).json({ error: "Update failed" });
+  }
+});
+
+router.get("/me/auto-reply", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const row = await db.execute(sql`
+      SELECT auto_reply_enabled, auto_reply_message FROM users WHERE id = ${req.userId!}::uuid
+    `);
+    const data = row.rows[0] as any;
+    res.json({
+      autoReplyEnabled: data?.auto_reply_enabled ?? false,
+      autoReplyMessage: data?.auto_reply_message ?? "",
+    });
+  } catch (err) {
+    logger.error({ err }, "Get auto-reply error");
+    res.status(500).json({ error: "Server error" });
   }
 });
 

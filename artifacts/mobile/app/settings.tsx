@@ -251,11 +251,103 @@ export default function SettingsScreen() {
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [username, setUsername] = useState(user?.username ?? "");
   const [bio, setBio] = useState(user?.bio ?? "");
+  const [statusText, setStatusText] = useState((user as any)?.statusText ?? "");
   const [readReceipts, setReadReceipts] = useState(user?.privacyReadReceipts ?? true);
   const [lastSeen, setLastSeen] = useState<PrivacyLevel>((user?.privacyLastSeen as PrivacyLevel) ?? "everyone");
   const [profilePhoto, setProfilePhoto] = useState<PrivacyLevel>((user?.privacyProfilePhoto as PrivacyLevel) ?? "everyone");
   const [saved, setSaved] = useState(false);
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
+  const [autoReplyMessage, setAutoReplyMessage] = useState("");
+  const [autoReplySaving, setAutoReplySaving] = useState(false);
+
+  // PIN state
+  const [pinEnabled, setPinEnabled] = useState(false);
+  const [pinModalOpen, setPinModalOpen] = useState(false);
+  const [pinStep, setPinStep] = useState<"enter" | "confirm" | "current">("enter");
+  const [pinInput, setPinInput] = useState("");
+  const [pinConfirm, setPinConfirm] = useState("");
+  const [currentPinInput, setCurrentPinInput] = useState("");
+  const [pinSaving, setPinSaving] = useState(false);
+  const [pinError, setPinError] = useState("");
+
+  // Font size
+  const [fontSize, setFontSize] = useState(1); // 0=small 1=normal 2=large 3=xlarge
+  const FONT_SIZES = ["Kecil", "Normal", "Besar", "Sangat Besar"];
+
+  // Load PIN status
+  React.useEffect(() => {
+    if (!token) return;
+    fetch(`${BASE_URL}/api/auth/pin/status`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((d) => setPinEnabled(d.pinEnabled ?? false))
+      .catch(() => {});
+  }, [token]);
+
+  const handlePinSetup = async () => {
+    if (!token) return;
+    if (pinStep === "current" && pinEnabled) {
+      if (currentPinInput.length !== 4) { setPinError("Masukkan PIN saat ini (4 digit)."); return; }
+      setPinStep("enter");
+      setPinError("");
+      return;
+    }
+    if (pinStep === "enter") {
+      if (pinInput.length !== 4) { setPinError("PIN harus 4 digit."); return; }
+      setPinStep("confirm");
+      setPinError("");
+      return;
+    }
+    if (pinStep === "confirm") {
+      if (pinConfirm !== pinInput) { setPinError("PIN tidak cocok. Coba lagi."); setPinConfirm(""); return; }
+      setPinSaving(true);
+      try {
+        const res = await fetch(`${BASE_URL}/api/auth/pin`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ pin: pinInput, currentPin: currentPinInput || undefined }),
+        });
+        const d = await res.json();
+        if (res.ok) {
+          setPinEnabled(true);
+          setPinModalOpen(false);
+          setPinInput(""); setPinConfirm(""); setCurrentPinInput(""); setPinStep("enter");
+          Alert.alert("Berhasil", "PIN verifikasi dua langkah telah diaktifkan.");
+        } else {
+          setPinError(d.error ?? "Gagal mengatur PIN.");
+        }
+      } catch { setPinError("Koneksi gagal."); }
+      finally { setPinSaving(false); }
+    }
+  };
+
+  const handlePinDisable = () => {
+    if (!pinEnabled) { setPinModalOpen(true); setPinStep(pinEnabled ? "current" : "enter"); return; }
+    Alert.prompt?.("Masukkan PIN Saat Ini", "Untuk menonaktifkan verifikasi dua langkah", async (pin) => {
+      if (!pin || pin.length !== 4) return;
+      try {
+        const res = await fetch(`${BASE_URL}/api/auth/pin`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ pin }),
+        });
+        const d = await res.json();
+        if (res.ok) { setPinEnabled(false); Alert.alert("Berhasil", "Verifikasi dua langkah dinonaktifkan."); }
+        else Alert.alert("Gagal", d.error ?? "PIN salah.");
+      } catch { Alert.alert("Error", "Koneksi gagal."); }
+    }, "secure-text");
+  };
+
+  React.useEffect(() => {
+    if (!token) return;
+    fetch(`${BASE_URL}/api/users/me/auto-reply`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((d) => {
+        setAutoReplyEnabled(d.autoReplyEnabled ?? false);
+        setAutoReplyMessage(d.autoReplyMessage ?? "");
+      })
+      .catch(() => {});
+  }, [token]);
 
   const { data: streakData } = useQuery({
     queryKey: ["streak"],
@@ -278,6 +370,23 @@ export default function SettingsScreen() {
   const aiCount = aiData?.contacts?.length ?? 0;
   const streak = streakData?.currentStreak ?? 0;
 
+  const handleSaveAutoReply = async () => {
+    if (!token) return;
+    setAutoReplySaving(true);
+    try {
+      await fetch(`${BASE_URL}/api/users/me`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ autoReplyEnabled, autoReplyMessage: autoReplyMessage.trim() || null }),
+      });
+      Alert.alert("Tersimpan", "Pengaturan balasan otomatis disimpan.");
+    } catch {
+      Alert.alert("Error", "Gagal menyimpan pengaturan.");
+    } finally {
+      setAutoReplySaving(false);
+    }
+  };
+
   const handleSave = () => {
     if (!displayName.trim()) return;
     updateMe.mutate(
@@ -286,6 +395,7 @@ export default function SettingsScreen() {
           displayName: displayName.trim(),
           username: username.trim() || undefined,
           bio: bio.trim() || undefined,
+          statusText: statusText.trim() || undefined,
           privacyReadReceipts: readReceipts,
           privacyLastSeen: lastSeen,
           privacyProfilePhoto: profilePhoto,
@@ -455,6 +565,68 @@ export default function SettingsScreen() {
           </View>
         </Section>
 
+        <Section title="Status Kustom">
+          <View style={styles.field}>
+            <Text style={[styles.fieldLabel, { color: c.mutedForeground }]}>Status Kamu</Text>
+            <TextInput
+              style={[styles.fieldInput, { color: c.foreground }]}
+              value={statusText}
+              onChangeText={setStatusText}
+              placeholder="😊 Tersedia untuk ngobrol..."
+              placeholderTextColor={c.mutedForeground}
+              maxLength={150}
+            />
+            <Text style={[{ color: c.mutedForeground, fontSize: 11, fontFamily: "Inter_400Regular", marginTop: 4 }]}>
+              {statusText.length}/150 karakter
+            </Text>
+          </View>
+        </Section>
+
+        <Section title="Balasan Otomatis">
+          <View style={[rowStyles.row, { borderBottomColor: c.border }]}>
+            <View style={[rowStyles.iconBg, { backgroundColor: c.warning + "18" }]}>
+              <Feather name="zap" size={17} color={c.warning} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[rowStyles.label, { color: c.foreground }]}>Aktifkan Balasan Otomatis</Text>
+              <Text style={[rowStyles.sub, { color: c.mutedForeground }]}>
+                {autoReplyEnabled ? "Aktif — membalas saat kamu offline" : "Nonaktif"}
+              </Text>
+            </View>
+            <Switch
+              value={autoReplyEnabled}
+              onValueChange={setAutoReplyEnabled}
+              trackColor={{ false: c.border, true: c.primary }}
+              thumbColor="#fff"
+            />
+          </View>
+          {autoReplyEnabled && (
+            <View style={[styles.field, { borderBottomColor: c.border }]}>
+              <Text style={[styles.fieldLabel, { color: c.mutedForeground }]}>Pesan Balasan</Text>
+              <TextInput
+                style={[styles.fieldInput, { color: c.foreground, minHeight: 56 }]}
+                value={autoReplyMessage}
+                onChangeText={setAutoReplyMessage}
+                placeholder="Saya sedang tidak tersedia, akan segera membalas. 🙏"
+                placeholderTextColor={c.mutedForeground}
+                multiline
+                maxLength={500}
+              />
+            </View>
+          )}
+          <TouchableOpacity
+            onPress={handleSaveAutoReply}
+            disabled={autoReplySaving}
+            style={[styles.autoReplyBtn, { backgroundColor: c.primary }]}
+          >
+            {autoReplySaving ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.autoReplyBtnText}>Simpan Pengaturan</Text>
+            )}
+          </TouchableOpacity>
+        </Section>
+
         <Section title="Privacy">
           <SettingRow
             icon="eye"
@@ -497,7 +669,55 @@ export default function SettingsScreen() {
           />
         </Section>
 
+        <Section title="Ukuran Font Chat">
+          <View style={[styles.field, { borderBottomWidth: 0 }]}>
+            <Text style={[styles.fieldLabel, { color: c.mutedForeground }]}>Ukuran teks pesan</Text>
+            <View style={[fontStyles.track, { backgroundColor: c.surface, borderColor: c.border }]}>
+              {FONT_SIZES.map((label, i) => (
+                <TouchableOpacity
+                  key={i}
+                  onPress={() => setFontSize(i)}
+                  style={[
+                    fontStyles.segment,
+                    fontSize === i && { backgroundColor: c.primary },
+                  ]}
+                >
+                  <Text style={[
+                    fontStyles.segText,
+                    { color: fontSize === i ? "#fff" : c.mutedForeground },
+                  ]}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={[fontStyles.preview, { color: c.foreground, fontSize: 12 + fontSize * 3 }]}>
+              Halo! Ini adalah pratinjau ukuran font pesan kamu.
+            </Text>
+          </View>
+        </Section>
+
         <Section title="Security">
+          <SettingRow
+            icon="lock"
+            label="Verifikasi Dua Langkah"
+            sublabel={pinEnabled ? "PIN aktif — ketuk untuk ubah" : "Tambahkan PIN untuk keamanan ekstra"}
+            iconColor="#8B5CF6"
+            onPress={() => {
+              if (pinEnabled) {
+                handlePinDisable();
+              } else {
+                setPinModalOpen(true);
+                setPinStep("enter");
+                setPinInput(""); setPinConfirm(""); setCurrentPinInput(""); setPinError("");
+              }
+            }}
+            right={
+              <View style={[pinStyles.badge, { backgroundColor: pinEnabled ? c.success + "22" : c.border + "40" }]}>
+                <Text style={[pinStyles.badgeText, { color: pinEnabled ? c.success : c.mutedForeground }]}>
+                  {pinEnabled ? "Aktif" : "Nonaktif"}
+                </Text>
+              </View>
+            }
+          />
           <SettingRow
             icon="shield"
             label="Active Sessions"
@@ -528,6 +748,84 @@ export default function SettingsScreen() {
         onClose={() => setSessionsOpen(false)}
         token={token}
       />
+
+      {/* PIN Setup Modal */}
+      <Modal visible={pinModalOpen} animationType="slide" transparent>
+        <View style={pinStyles.backdrop}>
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => setPinModalOpen(false)} />
+          <View style={[pinStyles.sheet, { backgroundColor: c.surface }]}>
+            <View style={pinStyles.handleRow}>
+              <View style={[pinStyles.handle, { backgroundColor: c.border }]} />
+            </View>
+            <Text style={[pinStyles.title, { color: c.foreground }]}>
+              {pinStep === "current" ? "Masukkan PIN Saat Ini" : pinStep === "enter" ? "Buat PIN Baru" : "Konfirmasi PIN"}
+            </Text>
+            <Text style={[pinStyles.sub, { color: c.mutedForeground }]}>
+              {pinStep === "current"
+                ? "Masukkan PIN yang sudah ada untuk melanjutkan"
+                : pinStep === "enter"
+                ? "Pilih 4 digit PIN untuk keamanan akun"
+                : `Ketik ulang PIN: ${pinInput.replace(/./g, "●")}`}
+            </Text>
+
+            {/* PIN Dot indicator */}
+            <View style={pinStyles.dotRow}>
+              {[0, 1, 2, 3].map((i) => {
+                const val = pinStep === "current" ? currentPinInput : pinStep === "enter" ? pinInput : pinConfirm;
+                return (
+                  <View key={i} style={[
+                    pinStyles.dot,
+                    { backgroundColor: i < val.length ? c.primary : c.border },
+                  ]} />
+                );
+              })}
+            </View>
+
+            {pinError ? <Text style={pinStyles.error}>{pinError}</Text> : null}
+
+            {/* Number pad */}
+            <View style={pinStyles.numPad}>
+              {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((k, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={[pinStyles.numKey, { backgroundColor: k === "" ? "transparent" : c.glass, borderColor: c.glassBorder }]}
+                  disabled={k === ""}
+                  activeOpacity={k === "" ? 1 : 0.7}
+                  onPress={() => {
+                    if (k === "") return;
+                    const setVal = pinStep === "current" ? setCurrentPinInput : pinStep === "enter" ? setPinInput : setPinConfirm;
+                    const getVal = pinStep === "current" ? currentPinInput : pinStep === "enter" ? pinInput : pinConfirm;
+                    if (k === "⌫") {
+                      setVal(getVal.slice(0, -1));
+                    } else if (getVal.length < 4) {
+                      setVal(getVal + String(k));
+                    }
+                    setPinError("");
+                  }}
+                >
+                  {k !== "" && (
+                    <Text style={[pinStyles.numText, { color: c.foreground }]}>{k}</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity
+              style={[pinStyles.confirmBtn, { backgroundColor: c.primary, opacity: pinSaving ? 0.7 : 1 }]}
+              onPress={handlePinSetup}
+              disabled={pinSaving}
+            >
+              {pinSaving ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={pinStyles.confirmText}>
+                  {pinStep === "current" ? "Lanjutkan" : pinStep === "enter" ? "Selanjutnya" : "Aktifkan PIN"}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -551,4 +849,41 @@ const styles = StyleSheet.create({
   addAIBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10 },
   addAIText: { color: "#fff", fontSize: 13, fontFamily: "Inter_600SemiBold" },
   privacyVal: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  autoReplyBtn: { marginHorizontal: 16, marginVertical: 12, borderRadius: 12, paddingVertical: 12, alignItems: "center" },
+  autoReplyBtnText: { color: "#fff", fontSize: 14, fontFamily: "Inter_600SemiBold" },
+});
+
+const fontStyles = StyleSheet.create({
+  track: {
+    flexDirection: "row", borderRadius: 10, borderWidth: StyleSheet.hairlineWidth,
+    marginTop: 10, overflow: "hidden",
+  },
+  segment: { flex: 1, paddingVertical: 8, alignItems: "center" },
+  segText: { fontSize: 12, fontFamily: "Inter_500Medium" },
+  preview: {
+    marginTop: 12, fontFamily: "Inter_400Regular", lineHeight: 22,
+    padding: 10, borderRadius: 10,
+  },
+});
+
+const pinStyles = StyleSheet.create({
+  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  badgeText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 32 },
+  handleRow: { alignItems: "center", paddingVertical: 10 },
+  handle: { width: 38, height: 4, borderRadius: 2 },
+  title: { fontSize: 20, fontWeight: "700", fontFamily: "Inter_700Bold", textAlign: "center", marginBottom: 6 },
+  sub: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", marginBottom: 24, paddingHorizontal: 24 },
+  dotRow: { flexDirection: "row", justifyContent: "center", gap: 16, marginBottom: 8 },
+  dot: { width: 16, height: 16, borderRadius: 8 },
+  error: { color: "#EF4444", fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", marginBottom: 8 },
+  numPad: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 32, gap: 12, marginBottom: 20, marginTop: 16 },
+  numKey: {
+    width: "29%", aspectRatio: 1.6, alignItems: "center", justifyContent: "center",
+    borderRadius: 14, borderWidth: StyleSheet.hairlineWidth,
+  },
+  numText: { fontSize: 22, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
+  confirmBtn: { marginHorizontal: 24, borderRadius: 14, paddingVertical: 14, alignItems: "center" },
+  confirmText: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
 });

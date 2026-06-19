@@ -20,6 +20,8 @@ import linkPreviewRouter from "./linkpreview.js";
 import patchNotesRouter from "./patchnotes.js";
 import adminApiRouter from "./adminApi.js";
 import scheduledRouter from "./scheduledMessages.js";
+import translateRouter from "./translate.js";
+import extrasRouter from "./extras.js";
 
 const router: IRouter = Router();
 
@@ -31,6 +33,7 @@ router.use("/conversations", conversationsRouter);
 router.use("/conversations", messagesRouter);
 router.use("/messages", messageCrudRouter);
 router.use("/messages", scheduledRouter);
+router.use("/messages", translateRouter);
 router.use("/posts", postsRouter);
 router.use("/stories", storiesRouter);
 router.use("/notifications", notificationsRouter);
@@ -45,5 +48,6 @@ router.use("/", linkPreviewRouter);
 router.use("/", reportsRouter);
 router.use("/patchnotes", patchNotesRouter);
 router.use("/admin", adminApiRouter);
+router.use("/", extrasRouter);
 
 export default router;

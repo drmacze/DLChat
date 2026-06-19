@@ -47,7 +47,7 @@ function getPreview(msg: ChatListItemProps["lastMessage"]): MediaPreview {
   if (msg.type === "voice") return { isMedia: true, icon: <MicIcon size={16} />, label: "Pesan suara" };
   if (msg.type === "file") return { isMedia: true, icon: <PaperclipIcon size={16} />, label: "File" };
   if (msg.type === "system") return { isMedia: false, text: msg.content ?? "" };
-  return { isMedia: false, text: msg.content ?? "" };
+  return { isMedia: false, text: msg.senderName ? `${msg.senderName}: ${msg.content ?? ""}` : (msg.content ?? "") };
 }
 
 export default function ChatListItem({

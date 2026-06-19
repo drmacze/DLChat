@@ -52,7 +52,7 @@ const TAB_ICONS: Record<TabName, string> = {
   Notifikasi: "bell",
   Maintenance: "tool",
   "Patch Notes": "file-text",
-  Pengumuman: "megaphone",
+  Pengumuman: "bell",
   Users: "users",
 };
 

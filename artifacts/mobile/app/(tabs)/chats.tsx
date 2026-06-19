@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  View, Text, FlatList, StyleSheet, TouchableOpacity,
+  View, Text, FlatList, ScrollView, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, Platform, Animated, Easing, Alert,
 } from "react-native";
 import { router } from "expo-router";
@@ -83,6 +83,25 @@ async function apiCall(path: string, method = "POST", body?: object) {
   return res.json();
 }
 
+const LABEL_FILTERS = [
+  { id: "all", label: "Semua" },
+  { id: "unread", label: "Belum Dibaca" },
+  { id: "personal", label: "Pribadi" },
+  { id: "work", label: "Kerja" },
+  { id: "family", label: "Keluarga" },
+];
+
+async function getConvLabel(convId: string): Promise<string | null> {
+  return AsyncStorage.getItem(`conv_label:${convId}`);
+}
+async function setConvLabel(convId: string, label: string | null) {
+  if (label) {
+    await AsyncStorage.setItem(`conv_label:${convId}`, label);
+  } else {
+    await AsyncStorage.removeItem(`conv_label:${convId}`);
+  }
+}
+
 export default function ChatsScreen() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
@@ -91,6 +110,8 @@ export default function ChatsScreen() {
   const queryClient = useQueryClient();
   const [showArchived, setShowArchived] = useState(false);
   const [showFabMenu, setShowFabMenu] = useState(false);
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [convLabels, setConvLabels] = useState<Record<string, string>>({});
 
   const { data, isLoading, refetch, isRefetching, error } = useGetConversations({
     query: { queryKey: ["conversations", showArchived], enabled: !!token },
@@ -124,9 +145,35 @@ export default function ChatsScreen() {
     return () => { socket.off("message:new", handler); };
   }, [socket, queryClient]);
 
-  const displayedConvs = showArchived
+  const allConvs = showArchived
     ? (archivedData?.conversations ?? [])
     : (data?.conversations ?? []);
+
+  useEffect(() => {
+    if (allConvs.length === 0) return;
+    Promise.all(allConvs.map((c: any) => getConvLabel(c.id).then((label) => ({ id: c.id as string, label }))))
+      .then((results) => {
+        const map: Record<string, string> = {};
+        results.forEach(({ id, label }: { id: string; label: string | null }) => { if (label) map[id] = label; });
+        setConvLabels(map);
+      });
+  }, [allConvs.length]);
+
+  const displayedConvs = allConvs.filter((conv: any) => {
+    if (activeFilter === "all") return true;
+    if (activeFilter === "unread") return conv.unreadCount > 0;
+    return convLabels[conv.id] === activeFilter;
+  });
+
+  const handleLabelConv = useCallback((convId: string) => {
+    Alert.alert("Beri Label", "Pilih label untuk percakapan ini:", [
+      { text: "Pribadi", onPress: () => { setConvLabel(convId, "personal"); setConvLabels((prev) => ({ ...prev, [convId]: "personal" })); } },
+      { text: "Kerja", onPress: () => { setConvLabel(convId, "work"); setConvLabels((prev) => ({ ...prev, [convId]: "work" })); } },
+      { text: "Keluarga", onPress: () => { setConvLabel(convId, "family"); setConvLabels((prev) => ({ ...prev, [convId]: "family" })); } },
+      { text: "Hapus Label", onPress: () => { setConvLabel(convId, null); setConvLabels((prev) => { const n = { ...prev }; delete n[convId]; return n; }); } },
+      { text: "Batal", style: "cancel" },
+    ]);
+  }, []);
 
   const handleArchive = useCallback(async (convId: string, currentlyArchived: boolean) => {
     try {
@@ -184,6 +231,21 @@ export default function ChatsScreen() {
             <Search size={18} color={c.mutedForeground as string} strokeWidth={1.8} />
           </TouchableOpacity>
           <TouchableOpacity
+            onPress={async () => {
+              try {
+                await fetch(`${BASE_URL}/api/conversations/read-all`, {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                queryClient.invalidateQueries({ queryKey: ["conversations"] });
+              } catch { /* silent */ }
+            }}
+            style={[styles.headerBtn, { backgroundColor: c.glass as string, borderColor: c.glassBorder as string }]}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Feather name="check-square" size={18} color={c.mutedForeground as string} />
+          </TouchableOpacity>
+          <TouchableOpacity
             onPress={() => router.push("/notifications")}
             style={[styles.headerBtn, { backgroundColor: c.glass as string, borderColor: c.glassBorder as string }]}
           >
@@ -200,6 +262,35 @@ export default function ChatsScreen() {
             <Text style={styles.archivedBannerClose}>Kembali</Text>
           </TouchableOpacity>
         </View>
+      )}
+
+      {!showArchived && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={[styles.filterRow, { borderBottomColor: c.border as string }]}
+        >
+          {LABEL_FILTERS.map((f) => (
+            <TouchableOpacity
+              key={f.id}
+              onPress={() => setActiveFilter(f.id)}
+              style={[
+                styles.filterChip,
+                {
+                  backgroundColor: activeFilter === f.id ? c.primary as string : c.surface as string,
+                  borderColor: activeFilter === f.id ? c.primary as string : c.border as string,
+                },
+              ]}
+            >
+              <Text style={[
+                styles.filterChipText,
+                { color: activeFilter === f.id ? "#fff" : c.mutedForeground as string },
+              ]}>
+                {f.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       )}
 
       {isLoading && !showArchived ? (
@@ -316,6 +407,16 @@ const styles = StyleSheet.create({
   },
   archivedBannerText: { flex: 1, color: "#fff", fontSize: 14, fontFamily: "Inter_500Medium" },
   archivedBannerClose: { color: "#fff", fontSize: 14, fontFamily: "Inter_600SemiBold", opacity: 0.85 },
+  filterRow: {
+    flexDirection: "row", alignItems: "center",
+    paddingHorizontal: 12, paddingVertical: 8, gap: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  filterChip: {
+    paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20,
+    borderWidth: 1,
+  },
+  filterChipText: { fontSize: 13, fontFamily: "Inter_500Medium" },
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10, paddingHorizontal: 40 },
   emptyTitle: { fontSize: 17, fontWeight: "700", fontFamily: "Inter_700Bold", marginTop: 8 },

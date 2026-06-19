@@ -1,15 +1,17 @@
 import React, { useState, useRef } from "react";
 import {
-  View, Text, StyleSheet, Image, TouchableOpacity, Alert, Animated,
+  View, Text, StyleSheet, Image, TouchableOpacity, Alert, Animated, ActivityIndicator,
 } from "react-native";
 import { Swipeable } from "react-native-gesture-handler";
 import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useTheme } from "@/context/ThemeContext";
 import FormattedText from "./FormattedText";
 import LinkPreview from "./LinkPreview";
+import { BASE_URL } from "@/utils/api";
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
@@ -61,6 +63,8 @@ function VoicePlayer({ uri, isMe, c }: { uri: string; isMe: boolean; c: Record<s
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [position, setPosition] = React.useState(0);
   const [duration, setDuration] = React.useState(0);
+  const [transcription, setTranscription] = React.useState<string | null>(null);
+  const [isTranscribing, setIsTranscribing] = React.useState(false);
 
   React.useEffect(() => {
     let mounted = true;
@@ -90,6 +94,26 @@ function VoicePlayer({ uri, isMe, c }: { uri: string; isMe: boolean; c: Record<s
     }
   };
 
+  const handleTranscribe = async () => {
+    if (transcription) { setTranscription(null); return; }
+    setIsTranscribing(true);
+    try {
+      const token = await AsyncStorage.getItem("auth_token");
+      const res = await fetch(`${BASE_URL}/api/ai/transcribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ url: uri }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
+      setTranscription(data.text ?? "");
+    } catch {
+      Alert.alert("Error", "Transkripsi gagal. Coba lagi.");
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
   const formatDur = (secs: number) =>
     `${Math.floor(secs / 60)}:${String(Math.floor(secs % 60)).padStart(2, "0")}`;
 
@@ -99,18 +123,30 @@ function VoicePlayer({ uri, isMe, c }: { uri: string; isMe: boolean; c: Record<s
   const textColor = isMe ? "rgba(255,255,255,0.7)" : (c.mutedForeground as string);
 
   return (
-    <View style={styles.voicePlayer}>
-      <TouchableOpacity onPress={togglePlay} style={[styles.voicePlayBtn, { backgroundColor: isMe ? "rgba(255,255,255,0.2)" : (c.surface as string) }]}>
-        <Feather name={isPlaying ? "pause" : "play"} size={16} color={iconColor} />
-      </TouchableOpacity>
-      <View style={styles.voiceWaveContainer}>
-        <View style={[styles.voiceWaveBg, { backgroundColor: waveColor }]}>
-          <View style={[styles.voiceWaveProgress, { width: `${progress * 100}%`, backgroundColor: progressColor }]} />
+    <View>
+      <View style={styles.voicePlayer}>
+        <TouchableOpacity onPress={togglePlay} style={[styles.voicePlayBtn, { backgroundColor: isMe ? "rgba(255,255,255,0.2)" : (c.surface as string) }]}>
+          <Feather name={isPlaying ? "pause" : "play"} size={16} color={iconColor} />
+        </TouchableOpacity>
+        <View style={styles.voiceWaveContainer}>
+          <View style={[styles.voiceWaveBg, { backgroundColor: waveColor }]}>
+            <View style={[styles.voiceWaveProgress, { width: `${progress * 100}%`, backgroundColor: progressColor }]} />
+          </View>
+          <Text style={[styles.voiceDuration, { color: textColor }]}>
+            {durationSecs > 0 ? formatDur(durationSecs) : "0:00"}
+          </Text>
         </View>
-        <Text style={[styles.voiceDuration, { color: textColor }]}>
-          {durationSecs > 0 ? formatDur(durationSecs) : "0:00"}
-        </Text>
+        <TouchableOpacity onPress={handleTranscribe} style={[styles.voiceTranscribeBtn, { opacity: isTranscribing ? 0.5 : 1 }]} disabled={isTranscribing}>
+          {isTranscribing ? (
+            <ActivityIndicator size={12} color={iconColor} />
+          ) : (
+            <Feather name={transcription ? "x" : "file-text"} size={14} color={iconColor} />
+          )}
+        </TouchableOpacity>
       </View>
+      {transcription ? (
+        <Text style={[styles.voiceTranscript, { color: textColor, borderColor: waveColor }]}>{transcription}</Text>
+      ) : null}
     </View>
   );
 }
@@ -331,12 +367,14 @@ const styles = StyleSheet.create({
   replyContent: { fontSize: 12, fontFamily: "Inter_400Regular" },
   mediaImage: { width: 220, height: 160, borderRadius: 10, marginBottom: 4 },
   mediaVideoPlaceholder: { width: 220, height: 160, borderRadius: 10, marginBottom: 4, alignItems: "center", justifyContent: "center" },
-  voicePlayer: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 4, minWidth: 160, maxWidth: 220 },
+  voicePlayer: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4, minWidth: 180, maxWidth: 240 },
   voicePlayBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   voiceWaveContainer: { flex: 1, gap: 3 },
   voiceWaveBg: { height: 4, borderRadius: 2, overflow: "hidden" },
   voiceWaveProgress: { height: "100%", borderRadius: 2 },
   voiceDuration: { fontSize: 10, fontFamily: "Inter_400Regular" },
+  voiceTranscribeBtn: { width: 26, height: 26, alignItems: "center", justifyContent: "center" },
+  voiceTranscript: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 6, paddingTop: 6, borderTopWidth: StyleSheet.hairlineWidth, lineHeight: 17 },
   content: { fontSize: 15, lineHeight: 20, fontFamily: "Inter_400Regular" },
   meta: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center", marginTop: 4, gap: 2 },
   edited: { fontSize: 11, fontFamily: "Inter_400Regular" },

@@ -20,14 +20,13 @@ import { ThemeProvider, useTheme } from "@/context/ThemeContext";
 import { TutorialProvider } from "@/context/TutorialContext";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import Avatar from "@/components/common/Avatar";
+import { BASE_URL } from "@/utils/api";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
 });
-
-const BASE_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}`;
 
 function PushNotificationRegistrar() {
   const { isAuthenticated, token } = useAuth();
@@ -103,22 +102,31 @@ function MaintenanceBanner() {
   const { user } = useAuth();
   const pathname = usePathname();
   const [maintenance, setMaintenance] = useState<{ isActive: boolean; message: string | null } | null>(null);
+  const retryRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const checkStatus = useCallback(async () => {
+  const checkStatus = useCallback(async (scheduleRetry = false) => {
     try {
-      const res = await fetch(`${BASE_URL}/api/admin/maintenance/status`);
+      const res = await fetch(`${BASE_URL}/api/admin/maintenance/status`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         setMaintenance(data);
+        return true;
       }
     } catch {}
+    if (scheduleRetry) {
+      if (retryRef.current) clearTimeout(retryRef.current);
+      retryRef.current = setTimeout(() => checkStatus(false), 5_000);
+    }
+    return false;
   }, []);
 
   useEffect(() => {
-    checkStatus();
-    // Re-check every 2 minutes
-    const interval = setInterval(checkStatus, 120_000);
-    return () => clearInterval(interval);
+    checkStatus(true);
+    const interval = setInterval(() => checkStatus(false), 30_000);
+    return () => {
+      clearInterval(interval);
+      if (retryRef.current) clearTimeout(retryRef.current);
+    };
   }, [checkStatus]);
 
   useEffect(() => {
@@ -127,10 +135,13 @@ function MaintenanceBanner() {
       setMaintenance(data);
     };
     socket.on("maintenance:update", onUpdate);
+    // Request current status on socket connect
+    checkStatus(false);
     return () => { socket.off("maintenance:update", onUpdate); };
-  }, [socket]);
+  }, [socket, checkStatus]);
 
-  if (!maintenance?.isActive || user?.username === "drmadev" || pathname === "/admin") return null;
+  if (user?.username === "drmadev" || pathname === "/admin") return null;
+  if (!maintenance?.isActive) return null;
 
   return (
     <Modal transparent animationType="fade" visible={true}>
@@ -142,7 +153,7 @@ function MaintenanceBanner() {
             {maintenance.message ?? "Aplikasi sedang diperbarui. Mohon tunggu sebentar."}
           </Text>
           <ActivityIndicator color={c.primary} style={{ marginTop: 20 }} />
-          <TouchableOpacity style={[maintenanceStyles.refreshBtn, { borderColor: c.border }]} onPress={checkStatus}>
+          <TouchableOpacity style={[maintenanceStyles.refreshBtn, { borderColor: c.border }]} onPress={() => checkStatus()}>
             <Feather name="refresh-cw" size={14} color={c.mutedForeground} />
             <Text style={[maintenanceStyles.refreshText, { color: c.mutedForeground }]}>Cek Status</Text>
           </TouchableOpacity>

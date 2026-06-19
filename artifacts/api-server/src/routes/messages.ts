@@ -252,6 +252,47 @@ router.post("/:conversationId/messages", requireAuth, async (req: AuthRequest, r
     });
 
     res.json(output);
+
+    // Auto-reply: send an auto-reply from any offline member who has it enabled
+    setImmediate(async () => {
+      try {
+        const membersForAutoReply = await db
+          .select({ userId: conversationMembers.userId })
+          .from(conversationMembers)
+          .where(and(
+            eq(conversationMembers.conversationId, convId),
+            sql`${conversationMembers.userId} != ${req.userId!}::uuid`
+          ));
+        const otherIds = membersForAutoReply.map((m) => m.userId);
+        if (otherIds.length === 0) return;
+
+        const io = getIO();
+        let onlineSet = new Set<string>();
+        if (io) {
+          const sockets = await io.fetchSockets();
+          onlineSet = new Set(sockets.map((s: any) => s.userId).filter(Boolean));
+        }
+        const offlineIds = otherIds.filter((id) => !onlineSet.has(id));
+        if (offlineIds.length === 0) return;
+
+        const arRows = await db.execute(sql`
+          SELECT id, auto_reply_message FROM users
+          WHERE id = ANY(ARRAY[${sql.join(offlineIds.map(id => sql`${id}::uuid`), sql`, `)}])
+            AND auto_reply_enabled = true
+        `);
+        for (const ar of arRows.rows as any[]) {
+          const replyContent = ar.auto_reply_message ?? "Saya sedang tidak tersedia, akan segera membalas. 🙏";
+          const [autoMsg] = await db.insert(messages).values({
+            conversationId: convId,
+            senderId: ar.id,
+            type: "text",
+            content: replyContent,
+          }).returning();
+          const autoOutput = await buildMessageOutput(autoMsg, ar.id);
+          broadcastMessage(convId, autoOutput);
+        }
+      } catch {}
+    });
   } catch (err) {
     logger.error({ err }, "Send message error");
     res.status(500).json({ error: "Server error" });

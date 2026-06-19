@@ -29,11 +29,14 @@ interface MessageActionsModalProps {
   onStar: () => void;
   onDelete: () => void;
   onCopy: () => void;
+  onTranslate?: () => void;
+  onSave?: () => void;
 }
 
 export default function MessageActionsModal({
   visible, message, isMe,
   onClose, onReact, onReply, onForward, onPin, onStar, onDelete, onCopy,
+  onTranslate, onSave,
 }: MessageActionsModalProps) {
   const { c } = useTheme();
   if (!message) return null;
@@ -44,6 +47,8 @@ export default function MessageActionsModal({
     { icon: message?.isPinned ? "x-circle" as const : "map-pin" as const, label: message?.isPinned ? "Lepas Pin" : "Pin", onPress: onPin },
     { icon: message?.isStarred ? "star" as const : "star" as const, label: message?.isStarred ? "Batal Bintang" : "Bintangi", onPress: onStar, starActive: message?.isStarred },
     ...(message?.content ? [{ icon: "copy" as const, label: "Salin", onPress: onCopy }] : []),
+    ...(message?.content && onTranslate ? [{ icon: "globe" as const, label: "Terjemahkan", onPress: onTranslate }] : []),
+    ...(onSave ? [{ icon: "bookmark" as const, label: "Simpan", onPress: onSave }] : []),
     ...(isMe ? [{ icon: "trash-2" as const, label: "Hapus", onPress: onDelete, danger: true }] : []),
   ];
 

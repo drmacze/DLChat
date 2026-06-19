@@ -286,4 +286,55 @@ router.delete("/:messageId/reactions", requireAuth, async (req: AuthRequest, res
   }
 });
 
+// GET /api/messages/search?q=&conversationId=&type=&limit=
+router.get("/search", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const { q, conversationId, type, limit = "30", before } = req.query as Record<string, string>;
+    if (!q || q.trim().length < 2) {
+      res.status(400).json({ error: "Query must be at least 2 characters" });
+      return;
+    }
+
+    const rows = await db.execute(sql`
+      SELECT
+        m.id, m.content, m.type, m.media_url as "mediaUrl",
+        m.created_at as "createdAt", m.conversation_id as "conversationId",
+        u.id as "senderId", u.display_name as "senderDisplayName", u.avatar_url as "senderAvatarUrl",
+        c.title as "conversationTitle", c.type as "conversationType"
+      FROM messages m
+      JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = ${req.userId!}::uuid
+      JOIN users u ON u.id = m.sender_id
+      JOIN conversations c ON c.id = m.conversation_id
+      WHERE m.deleted_at IS NULL
+        AND m.content ILIKE ${'%' + q.trim() + '%'}
+        ${conversationId ? sql`AND m.conversation_id = ${conversationId}::uuid` : sql``}
+        ${type ? sql`AND m.type = ${type}` : sql``}
+        ${before ? sql`AND m.created_at < ${before}::timestamptz` : sql``}
+      ORDER BY m.created_at DESC
+      LIMIT ${Math.min(parseInt(limit) || 30, 100)}
+    `);
+
+    res.json({
+      messages: rows.rows.map((r: any) => ({
+        id: r.id,
+        content: r.content,
+        type: r.type,
+        mediaUrl: r.mediaUrl,
+        createdAt: r.createdAt,
+        conversationId: r.conversationId,
+        conversationTitle: r.conversationTitle,
+        conversationType: r.conversationType,
+        sender: {
+          id: r.senderId,
+          displayName: r.senderDisplayName,
+          avatarUrl: r.senderAvatarUrl,
+        },
+      })),
+    });
+  } catch (err) {
+    logger.error({ err }, "Message search error");
+    res.status(500).json({ error: "Search failed" });
+  }
+});
+
 export default router;

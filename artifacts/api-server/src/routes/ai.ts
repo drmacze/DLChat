@@ -9,6 +9,31 @@ import { getGroqClient, buildSystemPrompt, GROQ_MODEL } from "../lib/groqClient.
 
 const router = Router();
 
+// POST /api/ai/transcribe — Groq Whisper voice transcription
+router.post("/transcribe", requireAuth, async (req: AuthRequest, res) => {
+  const { url, language } = req.body as { url?: string; language?: string };
+  if (!url) { res.status(400).json({ error: "url is required" }); return; }
+  try {
+    const audioRes = await fetch(url);
+    if (!audioRes.ok) { res.status(400).json({ error: "Failed to fetch audio" }); return; }
+    const buffer = await audioRes.arrayBuffer();
+    const filename = url.split("/").pop()?.split("?")[0] ?? "audio.m4a";
+    const file = new File([buffer], filename, { type: "audio/m4a" });
+    const groq = getGroqClient();
+    const transcription = await (groq.audio.transcriptions as any).create({
+      file,
+      model: "whisper-large-v3-turbo",
+      language: language ?? "id",
+      response_format: "text",
+    });
+    const text = typeof transcription === "string" ? transcription : ((transcription as any).text ?? "");
+    res.json({ text });
+  } catch (err) {
+    logger.error({ err }, "Transcription error");
+    res.status(500).json({ error: "Transcription failed" });
+  }
+});
+
 const personaCache = new Map<string, AIPersona>();
 const historyCache = new Map<string, Array<{ role: "user" | "assistant"; content: string }>>();
 
