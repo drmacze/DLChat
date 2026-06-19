@@ -15,6 +15,7 @@ import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 import { broadcastMessage, getIO } from "../socket/index.js";
 import { sendPushToUsers } from "../lib/pushNotifications.js";
+import { updateStreak } from "./streak.js";
 
 const router = Router({ mergeParams: true });
 
@@ -172,6 +173,9 @@ router.post("/:conversationId/messages", requireAuth, async (req: AuthRequest, r
     await db.insert(messageStatus)
       .values({ messageId: msg.id, userId: req.userId!, status: "read" })
       .onConflictDoNothing();
+
+    // Update chat streak for sender (fire and forget)
+    setImmediate(() => { updateStreak(req.userId!).catch(() => {}); });
 
     // Notify other members via push notification
     setImmediate(async () => {

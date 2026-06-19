@@ -34,9 +34,8 @@ export async function updateStreak(userId: string): Promise<void> {
 
 router.get("/", requireAuth, async (req: AuthRequest, res) => {
   try {
-    await updateStreak(req.userId!);
     const rows = await db.execute(sql`SELECT current_streak, longest_streak, last_active_date FROM streaks WHERE user_id = ${req.userId!}::uuid`);
-    if (rows.rows.length === 0) { res.json({ currentStreak: 1, longestStreak: 1, lastActiveDate: new Date().toISOString().split("T")[0] }); return; }
+    if (rows.rows.length === 0) { res.json({ currentStreak: 0, longestStreak: 0, lastActiveDate: null }); return; }
     const s = rows.rows[0] as Record<string, unknown>;
     res.json({ currentStreak: s.current_streak, longestStreak: s.longest_streak, lastActiveDate: s.last_active_date });
   } catch (err) {

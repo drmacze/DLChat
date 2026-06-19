@@ -19,13 +19,14 @@ import {
   useGetMessages,
   useSendMessage,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import * as Haptics from "expo-haptics";
 import MessageBubble from "@/components/chat/MessageBubble";
 import MessageInput from "@/components/chat/MessageInput";
 import MessageActionsModal from "@/components/chat/MessageActionsModal";
 import ForwardModal from "@/components/chat/ForwardModal";
+import StreakFireOverlay, { isMilestone } from "@/components/chat/StreakFireOverlay";
 import Avatar from "@/components/common/Avatar";
 import { useAuth } from "@/context/AuthContext";
 import { useSocket } from "@/context/SocketContext";
@@ -89,6 +90,21 @@ export default function ChatRoomScreen() {
   const [showSearch, setShowSearch] = useState(false);
 
   const [pinnedMessage, setPinnedMessage] = useState<MessageItem | null>(null);
+
+  const [sessionMsgCount, setSessionMsgCount] = useState(0);
+  const [showStreakFire, setShowStreakFire] = useState(false);
+  const [streakCount, setStreakCount] = useState(0);
+
+  const { data: streakData } = useQuery({
+    queryKey: ["streak"],
+    queryFn: async () => {
+      const tk = await getToken();
+      const res = await fetch(`${BASE_URL}/api/streak`, { headers: { Authorization: `Bearer ${tk}` } });
+      return res.json();
+    },
+    enabled: !!user,
+    staleTime: 60_000,
+  });
 
   const { data: convData } = useGetConversation(conversationId!, {
     query: { queryKey: ["conversation", conversationId] },
@@ -215,11 +231,23 @@ export default function ChatRoomScreen() {
         },
       },
       {
-        onSuccess: () => setReplyingTo(null),
+        onSuccess: () => {
+          setReplyingTo(null);
+          setSessionMsgCount((prev) => {
+            const next = prev + 1;
+            if (isMilestone(next)) {
+              const currentStreak = streakData?.currentStreak ?? 0;
+              setStreakCount(currentStreak > 0 ? currentStreak : 1);
+              setShowStreakFire(true);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            }
+            return next;
+          });
+        },
         onError: () => Alert.alert("Error", "Gagal mengirim pesan. Coba lagi."),
       }
     );
-  }, [conversationId, replyingTo]);
+  }, [conversationId, replyingTo, streakData]);
 
   const handleReact = useCallback(async (emoji: string) => {
     if (!selectedMessage) return;
@@ -506,6 +534,14 @@ export default function ChatRoomScreen() {
         messageId={selectedMessage?.id ?? null}
         onClose={() => setShowForwardModal(false)}
         onForwarded={() => Alert.alert("✅", "Pesan berhasil diteruskan!")}
+      />
+
+      {/* Streak Fire Overlay */}
+      <StreakFireOverlay
+        visible={showStreakFire}
+        streak={streakCount}
+        messagesCount={sessionMsgCount}
+        onHide={() => setShowStreakFire(false)}
       />
     </View>
   );
