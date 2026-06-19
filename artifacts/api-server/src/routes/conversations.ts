@@ -12,7 +12,7 @@ import {
 import { eq, and, desc, isNull, sql, or } from "drizzle-orm";
 import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
-import { broadcastMessage } from "../socket/index.js";
+import { broadcastMessage, getIO } from "../socket/index.js";
 
 const router = Router();
 
@@ -560,6 +560,31 @@ router.delete("/:conversationId/messages", requireAuth, async (req: AuthRequest,
     res.json({ success: true });
   } catch (err) {
     logger.error({ err }, "Clear chat history error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// PATCH /:conversationId/slow-mode — set slow mode delay (owner/admin only)
+router.patch("/:conversationId/slow-mode", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const parsed = z.object({ delay: z.number().int().min(0).max(3600) }).safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ error: "delay must be 0-3600 seconds" }); return; }
+    const member = await getMembership(String(req.params.conversationId), req.userId!);
+    if (!member) { res.status(403).json({ error: "Not a member" }); return; }
+    if (!["owner", "admin"].includes(member.role)) {
+      res.status(403).json({ error: "Only admins and owners can set slow mode" }); return;
+    }
+    await db.execute(sql`
+      UPDATE conversations SET slow_mode_delay = ${parsed.data.delay}
+      WHERE id = ${req.params.conversationId}
+    `);
+    const io = getIO();
+    if (io) io.to(`conv:${req.params.conversationId}`).emit("conversation:slow_mode", {
+      conversationId: req.params.conversationId, delay: parsed.data.delay,
+    });
+    res.json({ ok: true, delay: parsed.data.delay });
+  } catch (err) {
+    logger.error({ err }, "Set slow mode error");
     res.status(500).json({ error: "Server error" });
   }
 });

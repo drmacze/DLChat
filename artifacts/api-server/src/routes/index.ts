@@ -17,6 +17,9 @@ import botRouter from "./bot.js";
 import storageRouter from "./storage.js";
 import pollsRouter from "./polls.js";
 import linkPreviewRouter from "./linkpreview.js";
+import patchNotesRouter from "./patchnotes.js";
+import adminApiRouter from "./adminApi.js";
+import scheduledRouter from "./scheduledMessages.js";
 
 const router: IRouter = Router();
 
@@ -27,6 +30,7 @@ router.use("/contacts", contactsRouter);
 router.use("/conversations", conversationsRouter);
 router.use("/conversations", messagesRouter);
 router.use("/messages", messageCrudRouter);
+router.use("/messages", scheduledRouter);
 router.use("/posts", postsRouter);
 router.use("/stories", storiesRouter);
 router.use("/notifications", notificationsRouter);
@@ -39,5 +43,7 @@ router.use(storageRouter);
 router.use("/polls", pollsRouter);
 router.use("/", linkPreviewRouter);
 router.use("/", reportsRouter);
+router.use("/patchnotes", patchNotesRouter);
+router.use("/admin", adminApiRouter);
 
 export default router;

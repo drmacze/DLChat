@@ -8,8 +8,8 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, router } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect, useCallback } from "react";
-import { Platform, View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import React, { useEffect, useCallback, useState } from "react";
+import { Platform, View, Text, TouchableOpacity, StyleSheet, Modal, ActivityIndicator } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -97,6 +97,69 @@ function IncomingCallOverlay() {
   );
 }
 
+function MaintenanceBanner() {
+  const { c } = useTheme();
+  const { socket } = useSocket();
+  const [maintenance, setMaintenance] = useState<{ isActive: boolean; message: string | null } | null>(null);
+
+  const checkStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/admin/maintenance/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setMaintenance(data);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    checkStatus();
+    // Re-check every 2 minutes
+    const interval = setInterval(checkStatus, 120_000);
+    return () => clearInterval(interval);
+  }, [checkStatus]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const onUpdate = (data: { isActive: boolean; message: string | null }) => {
+      setMaintenance(data);
+    };
+    socket.on("maintenance:update", onUpdate);
+    return () => { socket.off("maintenance:update", onUpdate); };
+  }, [socket]);
+
+  if (!maintenance?.isActive) return null;
+
+  return (
+    <Modal transparent animationType="fade" visible={true}>
+      <View style={maintenanceStyles.overlay}>
+        <View style={[maintenanceStyles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <Text style={maintenanceStyles.emoji}>🔧</Text>
+          <Text style={[maintenanceStyles.title, { color: c.foreground }]}>Sedang Dalam Pemeliharaan</Text>
+          <Text style={[maintenanceStyles.message, { color: c.mutedForeground }]}>
+            {maintenance.message ?? "Aplikasi sedang diperbarui. Mohon tunggu sebentar."}
+          </Text>
+          <ActivityIndicator color={c.primary} style={{ marginTop: 20 }} />
+          <TouchableOpacity style={[maintenanceStyles.refreshBtn, { borderColor: c.border }]} onPress={checkStatus}>
+            <Feather name="refresh-cw" size={14} color={c.mutedForeground} />
+            <Text style={[maintenanceStyles.refreshText, { color: c.mutedForeground }]}>Cek Status</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const maintenanceStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.85)", alignItems: "center", justifyContent: "center", padding: 32 },
+  card: { borderRadius: 20, borderWidth: 1, padding: 32, width: "100%", maxWidth: 380, alignItems: "center" },
+  emoji: { fontSize: 48, marginBottom: 16 },
+  title: { fontSize: 20, fontWeight: "700", textAlign: "center", marginBottom: 10 },
+  message: { fontSize: 14, textAlign: "center", lineHeight: 22 },
+  refreshBtn: { marginTop: 24, flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 8 },
+  refreshText: { fontSize: 13 },
+});
+
 const callStyles = StyleSheet.create({
   container: {
     position: "absolute", top: Platform.OS === "ios" ? 50 : 30, left: 12, right: 12,
@@ -165,6 +228,7 @@ export default function RootLayout() {
                   <GestureHandlerRootView style={{ flex: 1 }}>
                     <RootLayoutNav />
                     <IncomingCallOverlay />
+                    <MaintenanceBanner />
                   </GestureHandlerRootView>
                 </SocketProvider>
               </AuthProvider>

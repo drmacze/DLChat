@@ -3,6 +3,7 @@ import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Platform } from "react-native";
+import { router } from "expo-router";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -54,6 +55,16 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
       sound: "default",
       enableVibrate: true,
       showBadge: true,
+    });
+    // High-priority call channel
+    await Notifications.setNotificationChannelAsync("calls", {
+      name: "Calls",
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 500, 200, 500],
+      lightColor: "#e74c3c",
+      sound: "default",
+      enableVibrate: true,
+      showBadge: false,
     });
   }
 
@@ -108,11 +119,30 @@ export function usePushNotifications(
 
     responseListener.current =
       Notifications.addNotificationResponseReceivedListener((response) => {
-        const data = response.notification.request.content.data as Record<
-          string,
-          unknown
-        >;
-        console.log("Notification tapped:", data);
+        const data = response.notification.request.content.data as Record<string, unknown>;
+        
+        // Handle incoming call notification tap — navigate to call screen
+        if (data?.type === "incoming_call" && data.conversationId) {
+          router.push({
+            pathname: "/call/[conversationId]",
+            params: {
+              conversationId: data.conversationId as string,
+              type: (data.callType as string) ?? "voice",
+              isIncoming: "true",
+              callerName: (data.callerName as string) ?? "Unknown",
+              avatarUrl: "",
+              roomId: (data.roomId as string) ?? `dlchat-${data.conversationId}`,
+            },
+          } as any);
+        }
+        
+        // Handle message notification tap — navigate to chat
+        if (data?.type === "message" && data.conversationId) {
+          router.push({
+            pathname: "/chat/[conversationId]",
+            params: { conversationId: data.conversationId as string },
+          } as any);
+        }
       });
 
     return () => {

@@ -155,6 +155,25 @@ router.post("/:conversationId/messages", requireAuth, async (req: AuthRequest, r
       res.status(400).json({ error: "Message must have content or media" }); return;
     }
 
+    // ── Slow Mode Check ──────────────────────────────────────────────────────
+    const convSlowRow = await db.execute(sql`SELECT slow_mode_delay FROM conversations WHERE id = ${convId}`);
+    const slowDelay: number = (convSlowRow.rows[0] as any)?.slow_mode_delay ?? 0;
+    if (slowDelay > 0) {
+      const cooldownRow = await db.execute(sql`
+        SELECT last_message_at FROM slow_mode_cooldown
+        WHERE user_id = ${req.userId}::uuid AND conversation_id = ${convId}::uuid
+      `);
+      if (cooldownRow.rows.length > 0) {
+        const lastAt = new Date((cooldownRow.rows[0] as any).last_message_at as string).getTime();
+        const elapsedSec = (Date.now() - lastAt) / 1000;
+        if (elapsedSec < slowDelay) {
+          const remaining = Math.ceil(slowDelay - elapsedSec);
+          res.status(429).json({ error: `Slow mode aktif. Tunggu ${remaining} detik lagi.`, remainingSeconds: remaining });
+          return;
+        }
+      }
+    }
+
     const [msg] = await db.insert(messages).values({
       conversationId: convId,
       senderId: req.userId!,
@@ -165,6 +184,15 @@ router.post("/:conversationId/messages", requireAuth, async (req: AuthRequest, r
     }).returning();
 
     await db.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, convId));
+
+    // Update slow mode cooldown after successful send
+    if (slowDelay > 0) {
+      await db.execute(sql`
+        INSERT INTO slow_mode_cooldown (user_id, conversation_id, last_message_at)
+        VALUES (${req.userId}::uuid, ${convId}::uuid, now())
+        ON CONFLICT (user_id, conversation_id) DO UPDATE SET last_message_at = now()
+      `);
+    }
 
     const output = await buildMessageOutput(msg, req.userId!);
     broadcastMessage(convId, output);

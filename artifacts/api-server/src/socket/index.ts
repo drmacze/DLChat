@@ -12,6 +12,9 @@ import {
 } from "@workspace/db";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
+import { sendPushToUsers } from "../lib/pushNotifications.js";
+import { pushTokens } from "@workspace/db";
+import { inArray } from "drizzle-orm";
 
 let io: SocketServer;
 
@@ -180,13 +183,44 @@ export function setupSocket(server: HttpServer) {
           .limit(1);
         if (!member) return;
         const [caller] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-        socket.to(`conv:${conversationId}`).emit("call:incoming", {
+        const callPayload = {
           conversationId,
           callType,
           callerId: userId,
           callerName: caller?.displayName ?? "Unknown",
           callerAvatar: caller?.avatarUrl ?? null,
           roomId: `dlchat-${conversationId}`,
+        };
+        socket.to(`conv:${conversationId}`).emit("call:incoming", callPayload);
+
+        // Push notification for background/offline recipients
+        setImmediate(async () => {
+          try {
+            const onlineSockets = await io.fetchSockets();
+            const onlineUserIds = new Set(onlineSockets.map((s: any) => s.userId).filter(Boolean));
+            // Get all members except caller
+            const members = await db.execute(sql`
+              SELECT user_id FROM conversation_members
+              WHERE conversation_id = ${conversationId} AND user_id != ${userId}::uuid
+            `);
+            const offlineMembers = members.rows
+              .map((r: any) => r.user_id as string)
+              .filter((id) => !onlineUserIds.has(id));
+            if (offlineMembers.length === 0) return;
+            const tokenRows = await db.select({ token: pushTokens.token })
+              .from(pushTokens)
+              .where(inArray(pushTokens.userId, offlineMembers));
+            const tokens = tokenRows.map((r) => r.token);
+            if (tokens.length === 0) return;
+            const callLabel = callType === "video" ? "Panggilan Video" : "Panggilan Suara";
+            await sendPushToUsers(tokens,
+              `📞 ${callLabel} Masuk`,
+              `${caller?.displayName ?? "Seseorang"} sedang menelepon...`,
+              { type: "incoming_call", conversationId, callType, callerId: userId, callerName: caller?.displayName ?? "Unknown", roomId: `dlchat-${conversationId}` }
+            );
+          } catch (pushErr) {
+            logger.warn({ pushErr }, "Call push notification failed");
+          }
         });
       } catch (err) {
         logger.error({ err }, "call:init error");

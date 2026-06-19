@@ -4,6 +4,7 @@ import { logger } from "./lib/logger.js";
 import { setupSocket } from "./socket/index.js";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { processScheduledMessages } from "./routes/scheduledMessages.js";
 
 const rawPort = process.env["PORT"];
 if (!rawPort) throw new Error("PORT environment variable is required but was not provided.");
@@ -353,6 +354,59 @@ async function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_story_reactions_story ON story_reactions(story_id);
       CREATE INDEX IF NOT EXISTS idx_polls_conv ON polls(conversation_id);
       CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes(poll_id);
+
+      -- Feature pack: patch notes
+      CREATE TABLE IF NOT EXISTS patch_notes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        version TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        is_major BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      -- Feature pack: maintenance mode
+      CREATE TABLE IF NOT EXISTS maintenance_mode (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        is_active BOOLEAN NOT NULL DEFAULT false,
+        message TEXT DEFAULT 'Sedang dalam pemeliharaan. Mohon tunggu sebentar.',
+        scheduled_end_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      INSERT INTO maintenance_mode (id) VALUES (1) ON CONFLICT DO NOTHING;
+
+      -- Feature pack: app announcements / popups
+      CREATE TABLE IF NOT EXISTS app_announcements (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'info',
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        expires_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      -- Feature pack: scheduled messages
+      CREATE TABLE IF NOT EXISTS scheduled_messages (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'text',
+        send_at TIMESTAMPTZ NOT NULL,
+        sent_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_scheduled_messages_pending ON scheduled_messages(send_at) WHERE sent_at IS NULL;
+
+      -- Feature pack: slow mode
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS slow_mode_delay INTEGER NOT NULL DEFAULT 0;
+      CREATE TABLE IF NOT EXISTS slow_mode_cooldown (
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        last_message_at TIMESTAMPTZ NOT NULL,
+        PRIMARY KEY (user_id, conversation_id)
+      );
     `);
     logger.info("Database schema initialized");
   } catch (err) {
@@ -363,4 +417,13 @@ async function runMigrations() {
 server.listen(port, async () => {
   await runMigrations();
   logger.info({ port }, "Server listening");
+
+  // Scheduled message processor — runs every 60 seconds
+  setInterval(() => {
+    processScheduledMessages().catch((err) =>
+      logger.error({ err }, "Scheduled message processor failed")
+    );
+  }, 60_000);
+  // Run once immediately on startup for any pending messages
+  processScheduledMessages().catch(() => {});
 });
