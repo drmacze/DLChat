@@ -34,6 +34,7 @@ function formatTime(isoString: string): string {
 
 function StatusIcon({ status, isMe }: { status?: string | null; isMe: boolean }) {
   if (!isMe) return null;
+  if (status === "sending") return <Text style={[styles.statusTick, { color: "rgba(255,255,255,0.4)" }]}>⏱</Text>;
   if (status === "read") return <Text style={[styles.statusTick, { color: "#2AABEE" }]}>✓✓</Text>;
   if (status === "delivered") return <Text style={[styles.statusTick, { color: "rgba(255,255,255,0.7)" }]}>✓✓</Text>;
   return <Text style={[styles.statusTick, { color: "rgba(255,255,255,0.5)" }]}>✓</Text>;

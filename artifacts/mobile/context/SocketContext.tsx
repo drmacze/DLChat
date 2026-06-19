@@ -15,6 +15,7 @@ export interface IncomingCall {
 interface SocketContextValue {
   socket: Socket | null;
   isConnected: boolean;
+  reconnectCount: number;
   joinConversation: (conversationId: string) => void;
   leaveConversation: (conversationId: string) => void;
   sendTyping: (conversationId: string) => void;
@@ -30,6 +31,7 @@ interface SocketContextValue {
 const SocketContext = createContext<SocketContextValue>({
   socket: null,
   isConnected: false,
+  reconnectCount: 0,
   joinConversation: () => {},
   leaveConversation: () => {},
   sendTyping: () => {},
@@ -47,6 +49,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const socketRef = useRef<Socket | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [reconnectCount, setReconnectCount] = useState(0);
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
 
   useEffect(() => {
@@ -65,10 +68,14 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 20,
+      timeout: 10000,
     });
 
-    newSocket.on("connect", () => setIsConnected(true));
+    newSocket.on("connect", () => {
+      setIsConnected(true);
+      setReconnectCount((c) => c + 1);
+    });
     newSocket.on("disconnect", () => setIsConnected(false));
     newSocket.on("connect_error", (err) => console.warn("Socket error:", err.message));
     newSocket.on("call:incoming", (data: IncomingCall) => setIncomingCall(data));
@@ -125,7 +132,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   return (
     <SocketContext.Provider
       value={{
-        socket, isConnected,
+        socket, isConnected, reconnectCount,
         joinConversation, leaveConversation,
         sendTyping, stopTyping,
         initiateCall, acceptCall, rejectCall, endCall,

@@ -134,14 +134,24 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold });
+  const [fontReady, setFontReady] = React.useState(Platform.OS === "web");
 
   useEffect(() => {
-    if (fontsLoaded || fontError || Platform.OS === "web") {
+    if (fontsLoaded || fontError) {
+      setFontReady(true);
       SplashScreen.hideAsync().catch(() => {});
     }
   }, [fontsLoaded, fontError]);
 
-  if (Platform.OS !== "web" && !fontsLoaded && !fontError) return null;
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setFontReady(true);
+      SplashScreen.hideAsync().catch(() => {});
+    }, 3000);
+    return () => clearTimeout(timeout);
+  }, []);
+
+  if (!fontReady) return null;
 
   return (
     <ThemeProvider>

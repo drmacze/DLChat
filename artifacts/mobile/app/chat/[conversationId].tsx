@@ -71,7 +71,7 @@ export default function ChatRoomScreen() {
   const insets = useSafeAreaInsets();
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const { user } = useAuth();
-  const { socket, joinConversation, leaveConversation, sendTyping, stopTyping, initiateCall } = useSocket();
+  const { socket, reconnectCount, joinConversation, leaveConversation, sendTyping, stopTyping, initiateCall } = useSocket();
   const queryClient = useQueryClient();
   const sendMessage = useSendMessage();
 
@@ -129,7 +129,7 @@ export default function ChatRoomScreen() {
     if (!conversationId) return;
     joinConversation(conversationId);
     return () => leaveConversation(conversationId);
-  }, [conversationId]);
+  }, [conversationId, reconnectCount]);
 
   useEffect(() => {
     if (!socket) return;
@@ -219,7 +219,30 @@ export default function ChatRoomScreen() {
   }, [hasMore, isLoadingMore, conversationId]);
 
   const handleSend = useCallback((text: string, mediaUrl?: string, type?: string) => {
-    if (!conversationId) return;
+    if (!conversationId || !user) return;
+
+    const tempId = `temp-${Date.now()}-${Math.random()}`;
+    const optimisticMsg: MessageItem = {
+      id: tempId,
+      content: text || null,
+      mediaUrl: mediaUrl || null,
+      type: type || "text",
+      createdAt: new Date().toISOString(),
+      editedAt: null,
+      deletedAt: null,
+      senderId: user.id,
+      isPinned: false,
+      isStarred: false,
+      forwardedFromMessageId: null,
+      sender: { id: user.id, displayName: user.displayName ?? "Me", avatarUrl: (user as any).avatarUrl ?? null, isOnline: true, lastSeenAt: null },
+      reactions: [],
+      replyTo: replyingTo ? { content: replyingTo.content, senderName: replyingTo.sender.displayName, mediaUrl: replyingTo.mediaUrl } : null,
+      status: "sending",
+    };
+
+    setLocalMessages((prev) => [...prev, optimisticMsg]);
+    setReplyingTo(null);
+
     sendMessage.mutate(
       {
         conversationId,
@@ -231,8 +254,12 @@ export default function ChatRoomScreen() {
         },
       },
       {
-        onSuccess: () => {
-          setReplyingTo(null);
+        onSuccess: (serverMsg: any) => {
+          setLocalMessages((prev) => {
+            const withoutTemp = prev.filter((m) => m.id !== tempId);
+            if (withoutTemp.find((m) => m.id === serverMsg.id)) return withoutTemp;
+            return [...withoutTemp, { ...serverMsg, status: "sent" }];
+          });
           setSessionMsgCount((prev) => {
             const next = prev + 1;
             if (isMilestone(next)) {
@@ -244,10 +271,13 @@ export default function ChatRoomScreen() {
             return next;
           });
         },
-        onError: () => Alert.alert("Error", "Gagal mengirim pesan. Coba lagi."),
+        onError: () => {
+          setLocalMessages((prev) => prev.filter((m) => m.id !== tempId));
+          Alert.alert("Error", "Gagal mengirim pesan. Coba lagi.");
+        },
       }
     );
-  }, [conversationId, replyingTo, streakData]);
+  }, [conversationId, replyingTo, streakData, user]);
 
   const handleReact = useCallback(async (emoji: string) => {
     if (!selectedMessage) return;

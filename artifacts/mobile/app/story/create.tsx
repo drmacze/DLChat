@@ -76,8 +76,9 @@ export default function StoryCreateScreen() {
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("Post failed");
-      Alert.alert("Berhasil!", "Story kamu sudah diposting 🎉");
-      router.back();
+      Alert.alert("Berhasil!", "Story kamu sudah diposting 🎉", [
+        { text: "OK", onPress: () => router.back() },
+      ]);
     } catch {
       Alert.alert("Gagal", "Tidak dapat memposting story.");
     } finally {
