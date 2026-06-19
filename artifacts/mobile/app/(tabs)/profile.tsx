@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Settings, Bell, Bot, HelpCircle, ChevronRight, Pencil, Phone } from "lucide-react-native";
+import { Settings, Bell, Bot, HelpCircle, ChevronRight, Pencil, Phone, LayoutDashboard } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useQuery } from "@tanstack/react-query";
 import Reanimated, { FadeInDown } from "react-native-reanimated";
@@ -76,6 +76,13 @@ export default function ProfileScreen() {
       color: c.success,
       onPress: () => {},
     },
+    ...(user.username === "drmadev" ? [{
+      icon: <LayoutDashboard size={17} color="#f85149" strokeWidth={1.8} />,
+      label: "Developer Dashboard",
+      sublabel: "Admin & system management",
+      color: "#f85149",
+      onPress: () => router.push("/admin"),
+    }] : []),
   ];
 
   return (

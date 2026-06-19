@@ -6,7 +6,7 @@ import {
   useFonts,
 } from "@expo-google-fonts/inter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack, router } from "expo-router";
+import { Stack, router, usePathname } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useCallback, useState } from "react";
 import { Platform, View, Text, TouchableOpacity, StyleSheet, Modal, ActivityIndicator } from "react-native";
@@ -100,6 +100,8 @@ function IncomingCallOverlay() {
 function MaintenanceBanner() {
   const { c } = useTheme();
   const { socket } = useSocket();
+  const { user } = useAuth();
+  const pathname = usePathname();
   const [maintenance, setMaintenance] = useState<{ isActive: boolean; message: string | null } | null>(null);
 
   const checkStatus = useCallback(async () => {
@@ -128,7 +130,7 @@ function MaintenanceBanner() {
     return () => { socket.off("maintenance:update", onUpdate); };
   }, [socket]);
 
-  if (!maintenance?.isActive) return null;
+  if (!maintenance?.isActive || user?.username === "drmadev" || pathname === "/admin") return null;
 
   return (
     <Modal transparent animationType="fade" visible={true}>
