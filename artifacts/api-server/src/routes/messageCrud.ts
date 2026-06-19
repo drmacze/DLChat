@@ -233,6 +233,24 @@ router.post("/:messageId/reactions", requireAuth, async (req: AuthRequest, res) 
   }
 });
 
+router.post("/bulk-delete", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const { messageIds } = z.object({ messageIds: z.array(z.string().uuid()).min(1).max(100) }).parse(req.body);
+    const deleted: string[] = [];
+    for (const messageId of messageIds) {
+      const [msg] = await db.select().from(messages).where(eq(messages.id, messageId)).limit(1);
+      if (!msg || msg.senderId !== req.userId || msg.deletedAt) continue;
+      await db.update(messages).set({ deletedAt: new Date() }).where(eq(messages.id, msg.id));
+      broadcastMessageDeleted(msg.conversationId, msg.id);
+      deleted.push(msg.id);
+    }
+    res.json({ success: true, deleted });
+  } catch (err) {
+    logger.error({ err }, "Bulk delete error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 router.delete("/:messageId/reactions", requireAuth, async (req: AuthRequest, res) => {
   try {
     const { emoji } = z.object({ emoji: z.string().min(1).max(10) }).parse(req.body);

@@ -1,22 +1,45 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View, TextInput, TouchableOpacity, StyleSheet,
-  Platform, Alert, Text, Animated,
+  Platform, Alert, Text, Animated, FlatList,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 import { Audio } from "expo-av";
 import { useTheme } from "@/context/ThemeContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BASE_URL } from "@/utils/api";
+
+interface MentionMember {
+  id: string;
+  displayName: string;
+  avatarUrl?: string | null;
+}
 
 interface MessageInputProps {
   onSend: (text: string, mediaUrl?: string, type?: string) => void;
   onTyping?: () => void;
   onStopTyping?: () => void;
   placeholder?: string;
+  conversationId?: string;
+  members?: MentionMember[];
+  replyBar?: React.ReactNode;
+}
+
+async function compressImage(uri: string): Promise<string> {
+  try {
+    const result = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 1200 } }],
+      { compress: 0.78, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    return result.uri;
+  } catch {
+    return uri;
+  }
 }
 
 async function uploadMedia(uri: string, mimeType: string): Promise<string> {
@@ -39,8 +62,16 @@ function formatDuration(secs: number) {
   return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
 }
 
+function getDraftKey(conversationId?: string) {
+  return conversationId ? `draft:${conversationId}` : null;
+}
+
 export default function MessageInput({
-  onSend, onTyping, onStopTyping, placeholder = "Pesan...",
+  onSend, onTyping, onStopTyping,
+  placeholder = "Pesan...",
+  conversationId,
+  members = [],
+  replyBar,
 }: MessageInputProps) {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
@@ -48,10 +79,43 @@ export default function MessageInput({
   const [isUploading, setIsUploading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSecs, setRecordingSecs] = useState(0);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionSuggestions, setMentionSuggestions] = useState<MentionMember[]>([]);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const inputRef = useRef<TextInput>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // Load draft on mount
+  useEffect(() => {
+    const key = getDraftKey(conversationId);
+    if (!key) return;
+    AsyncStorage.getItem(key).then((val) => {
+      if (val) setText(val);
+    });
+  }, [conversationId]);
+
+  // Save draft on text change (debounced)
+  const saveDraft = useCallback((val: string) => {
+    const key = getDraftKey(conversationId);
+    if (!key) return;
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => {
+      if (val.trim()) {
+        AsyncStorage.setItem(key, val);
+      } else {
+        AsyncStorage.removeItem(key);
+      }
+    }, 500);
+  }, [conversationId]);
+
+  // Clear draft when message is sent
+  const clearDraft = useCallback(() => {
+    const key = getDraftKey(conversationId);
+    if (key) AsyncStorage.removeItem(key);
+  }, [conversationId]);
 
   useEffect(() => {
     if (isRecording) {
@@ -67,8 +131,25 @@ export default function MessageInput({
     }
   }, [isRecording]);
 
+  const detectMention = (val: string) => {
+    const match = val.match(/@(\w*)$/);
+    if (match && members.length > 0) {
+      const query = match[1].toLowerCase();
+      setMentionQuery(query);
+      const filtered = members.filter(
+        (m) => m.displayName.toLowerCase().includes(query)
+      );
+      setMentionSuggestions(filtered.slice(0, 5));
+    } else {
+      setMentionQuery(null);
+      setMentionSuggestions([]);
+    }
+  };
+
   const handleChangeText = (val: string) => {
     setText(val);
+    saveDraft(val);
+    detectMention(val);
     if (val.length > 0) {
       onTyping?.();
       if (typingTimer.current) clearTimeout(typingTimer.current);
@@ -78,14 +159,26 @@ export default function MessageInput({
     }
   };
 
+  const handleMentionSelect = (member: MentionMember) => {
+    const newText = text.replace(/@\w*$/, `@${member.displayName} `);
+    setText(newText);
+    saveDraft(newText);
+    setMentionQuery(null);
+    setMentionSuggestions([]);
+    inputRef.current?.focus();
+  };
+
   const handleSend = () => {
     const trimmed = text.trim();
     if (!trimmed) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onSend(trimmed);
     setText("");
+    clearDraft();
     onStopTyping?.();
     if (typingTimer.current) clearTimeout(typingTimer.current);
+    setMentionQuery(null);
+    setMentionSuggestions([]);
   };
 
   const handlePickImage = async () => {
@@ -96,21 +189,51 @@ export default function MessageInput({
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images", "videos"],
-      quality: 0.8,
+      quality: 1,
       allowsEditing: false,
     });
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
     const isVideo = asset.type === "video";
-    const mimeType = isVideo ? "video/mp4" : "image/jpeg";
+    let uri = asset.uri;
+    let mimeType = isVideo ? "video/mp4" : "image/jpeg";
     const msgType = isVideo ? "video" : "image";
+
     setIsUploading(true);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      const url = await uploadMedia(asset.uri, mimeType);
+      if (!isVideo) {
+        uri = await compressImage(uri);
+      }
+      const url = await uploadMedia(uri, mimeType);
       onSend("", url, msgType);
     } catch {
       Alert.alert("Upload gagal", "Tidak dapat mengunggah media.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleCamera = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Izin diperlukan", "Izinkan akses kamera.");
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ["images"],
+      quality: 1,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    setIsUploading(true);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const uri = await compressImage(asset.uri);
+      const url = await uploadMedia(uri, "image/jpeg");
+      onSend("", url, "image");
+    } catch {
+      Alert.alert("Upload gagal", "Tidak dapat mengunggah foto.");
     } finally {
       setIsUploading(false);
     }
@@ -186,17 +309,17 @@ export default function MessageInput({
 
   if (isRecording) {
     return (
-      <View style={[styles.container, { backgroundColor: c.sidebar, borderTopColor: c.border, paddingBottom: Math.max(insets.bottom, 8) }]}>
-        <View style={[styles.recordingRow, { backgroundColor: c.surface }]}>
+      <View style={[styles.container, { backgroundColor: c.sidebar as string, borderTopColor: c.border as string, paddingBottom: Math.max(insets.bottom, 8) }]}>
+        <View style={[styles.recordingRow, { backgroundColor: c.surface as string }]}>
           <TouchableOpacity onPress={cancelRecording} style={styles.cancelRecording}>
-            <Feather name="x" size={20} color={c.danger} />
+            <Feather name="x" size={20} color={c.danger as string} />
           </TouchableOpacity>
-          <Animated.View style={[styles.recordingDot, { backgroundColor: c.danger, transform: [{ scale: pulseAnim }] }]} />
-          <Text style={[styles.recordingTimer, { color: c.foreground }]}>{formatDuration(recordingSecs)}</Text>
-          <Text style={[styles.recordingLabel, { color: c.mutedForeground }]}>Merekam...</Text>
+          <Animated.View style={[styles.recordingDot, { backgroundColor: c.danger as string, transform: [{ scale: pulseAnim }] }]} />
+          <Text style={[styles.recordingTimer, { color: c.foreground as string }]}>{formatDuration(recordingSecs)}</Text>
+          <Text style={[styles.recordingLabel, { color: c.mutedForeground as string }]}>Merekam...</Text>
           <TouchableOpacity
             onPress={stopRecordingAndSend}
-            style={[styles.sendRecordingBtn, { backgroundColor: c.primary }]}
+            style={[styles.sendRecordingBtn, { backgroundColor: c.primary as string }]}
           >
             <Feather name="send" size={18} color="#fff" />
           </TouchableOpacity>
@@ -206,60 +329,94 @@ export default function MessageInput({
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: c.sidebar, borderTopColor: c.border, paddingBottom: Math.max(insets.bottom, 8) }]}>
-      <View style={[styles.inputRow, { backgroundColor: c.surface }]}>
-        <TouchableOpacity
-          style={styles.attachBtn}
-          onPress={handlePickImage}
-          disabled={isUploading}
-          activeOpacity={0.7}
-        >
-          <Feather name={isUploading ? "loader" : "image"} size={20} color={isUploading ? c.primary : c.mutedForeground} />
-        </TouchableOpacity>
+    <View style={[styles.outerContainer, { backgroundColor: c.sidebar as string, borderTopColor: c.border as string, paddingBottom: Math.max(insets.bottom, 8) }]}>
+      {/* Mentions autocomplete */}
+      {mentionSuggestions.length > 0 && (
+        <View style={[styles.mentionList, { backgroundColor: c.surface as string, borderColor: c.border as string }]}>
+          {mentionSuggestions.map((m) => (
+            <TouchableOpacity
+              key={m.id}
+              onPress={() => handleMentionSelect(m)}
+              style={[styles.mentionItem, { borderBottomColor: c.border as string }]}
+            >
+              <View style={[styles.mentionAvatar, { backgroundColor: c.primary as string }]}>
+                <Text style={styles.mentionAvatarText}>{m.displayName[0]?.toUpperCase()}</Text>
+              </View>
+              <Text style={[styles.mentionName, { color: c.foreground as string }]}>@{m.displayName}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
-        <TextInput
-          style={[styles.input, { color: c.foreground }]}
-          placeholder={placeholder}
-          placeholderTextColor={c.mutedForeground}
-          value={text}
-          onChangeText={handleChangeText}
-          multiline
-          maxLength={4000}
-          onSubmitEditing={Platform.OS === "web" ? handleSend : undefined}
-          blurOnSubmit={false}
-        />
+      {/* Reply bar slot */}
+      {replyBar}
 
-        {text.trim() ? (
+      <View style={styles.container}>
+        <View style={[styles.inputRow, { backgroundColor: c.surface as string }]}>
           <TouchableOpacity
-            style={[styles.sendBtn, { backgroundColor: canSend ? c.primary : "transparent" }]}
-            onPress={handleSend}
-            activeOpacity={0.7}
-            disabled={!canSend}
-          >
-            <Feather name="send" size={18} color={canSend ? "#fff" : c.mutedForeground} />
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={[styles.sendBtn, { backgroundColor: c.surface }]}
-            onPress={startRecording}
-            activeOpacity={0.7}
+            style={styles.attachBtn}
+            onPress={handleCamera}
             disabled={isUploading}
+            activeOpacity={0.7}
           >
-            <Feather name="mic" size={18} color={isUploading ? c.mutedForeground : c.primary} />
+            <Feather name="camera" size={20} color={isUploading ? c.primary as string : c.mutedForeground as string} />
           </TouchableOpacity>
-        )}
+
+          <TouchableOpacity
+            style={styles.attachBtn}
+            onPress={handlePickImage}
+            disabled={isUploading}
+            activeOpacity={0.7}
+          >
+            <Feather name={isUploading ? "loader" : "image"} size={20} color={isUploading ? c.primary as string : c.mutedForeground as string} />
+          </TouchableOpacity>
+
+          <TextInput
+            ref={inputRef}
+            style={[styles.input, { color: c.foreground as string }]}
+            placeholder={placeholder}
+            placeholderTextColor={c.mutedForeground as string}
+            value={text}
+            onChangeText={handleChangeText}
+            multiline
+            maxLength={4000}
+            onSubmitEditing={Platform.OS === "web" ? handleSend : undefined}
+            blurOnSubmit={false}
+          />
+
+          {text.trim() ? (
+            <TouchableOpacity
+              style={[styles.sendBtn, { backgroundColor: canSend ? c.primary as string : "transparent" }]}
+              onPress={handleSend}
+              activeOpacity={0.7}
+              disabled={!canSend}
+            >
+              <Feather name="send" size={18} color={canSend ? "#fff" : c.mutedForeground as string} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[styles.sendBtn, { backgroundColor: c.surface as string }]}
+              onPress={startRecording}
+              activeOpacity={0.7}
+              disabled={isUploading}
+            >
+              <Feather name="mic" size={18} color={isUploading ? c.mutedForeground as string : c.primary as string} />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingTop: 8 },
+  outerContainer: { borderTopWidth: StyleSheet.hairlineWidth },
+  container: { paddingHorizontal: 12, paddingTop: 8 },
   inputRow: {
     flexDirection: "row", alignItems: "flex-end",
-    borderRadius: 24, paddingLeft: 8, paddingRight: 6, paddingVertical: 6, minHeight: 44,
+    borderRadius: 24, paddingLeft: 4, paddingRight: 6, paddingVertical: 6, minHeight: 44,
   },
-  attachBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", marginRight: 4 },
+  attachBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", marginRight: 2 },
   input: { flex: 1, fontSize: 15, fontFamily: "Inter_400Regular", maxHeight: 120, paddingTop: 4, paddingBottom: 4 },
   sendBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", marginLeft: 6 },
   recordingRow: {
@@ -271,4 +428,22 @@ const styles = StyleSheet.create({
   recordingTimer: { fontSize: 15, fontFamily: "Inter_700Bold", minWidth: 40 },
   recordingLabel: { flex: 1, fontSize: 13, fontFamily: "Inter_400Regular" },
   sendRecordingBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  mentionList: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    overflow: "hidden",
+    marginHorizontal: 12,
+    maxHeight: 200,
+  },
+  mentionItem: {
+    flexDirection: "row", alignItems: "center",
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth, gap: 10,
+  },
+  mentionAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  mentionAvatarText: { color: "#fff", fontSize: 14, fontWeight: "700" },
+  mentionName: { fontSize: 15, fontFamily: "Inter_500Medium" },
 });

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 import { io, Socket } from "socket.io-client";
 import { useAuth } from "./AuthContext";
 import { BASE_URL } from "@/utils/api";
@@ -10,6 +11,17 @@ export interface IncomingCall {
   callerName: string;
   callerAvatar: string | null;
   roomId: string;
+}
+
+export interface QueuedMessage {
+  id: string;
+  conversationId: string;
+  content: string;
+  type: string;
+  mediaUrl?: string;
+  replyToMessageId?: string;
+  tempId: string;
+  queuedAt: number;
 }
 
 interface SocketContextValue {
@@ -26,6 +38,9 @@ interface SocketContextValue {
   endCall: (conversationId: string) => void;
   incomingCall: IncomingCall | null;
   clearIncomingCall: () => void;
+  messageQueue: QueuedMessage[];
+  enqueueMessage: (msg: QueuedMessage) => void;
+  removeFromQueue: (tempId: string) => void;
 }
 
 const SocketContext = createContext<SocketContextValue>({
@@ -42,6 +57,9 @@ const SocketContext = createContext<SocketContextValue>({
   endCall: () => {},
   incomingCall: null,
   clearIncomingCall: () => {},
+  messageQueue: [],
+  enqueueMessage: () => {},
+  removeFromQueue: () => {},
 });
 
 export function SocketProvider({ children }: { children: React.ReactNode }) {
@@ -51,6 +69,24 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [reconnectCount, setReconnectCount] = useState(0);
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+  const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startHeartbeat = useCallback((sock: Socket) => {
+    if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+    heartbeatRef.current = setInterval(() => {
+      if (sock.connected) {
+        sock.emit("ping");
+      }
+    }, 25000);
+  }, []);
+
+  const stopHeartbeat = useCallback(() => {
+    if (heartbeatRef.current) {
+      clearInterval(heartbeatRef.current);
+      heartbeatRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!token) {
@@ -60,6 +96,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         setSocket(null);
         setIsConnected(false);
       }
+      stopHeartbeat();
       return;
     }
 
@@ -68,16 +105,28 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionAttempts: 20,
+      reconnectionDelayMax: 10000,
+      reconnectionAttempts: 30,
       timeout: 10000,
     });
 
     newSocket.on("connect", () => {
       setIsConnected(true);
       setReconnectCount((c) => c + 1);
+      startHeartbeat(newSocket);
     });
-    newSocket.on("disconnect", () => setIsConnected(false));
-    newSocket.on("connect_error", (err) => console.warn("Socket error:", err.message));
+
+    newSocket.on("disconnect", () => {
+      setIsConnected(false);
+      stopHeartbeat();
+    });
+
+    newSocket.on("connect_error", (err) => {
+      console.warn("Socket error:", err.message);
+    });
+
+    newSocket.on("pong", () => {});
+
     newSocket.on("call:incoming", (data: IncomingCall) => setIncomingCall(data));
     newSocket.on("call:ended", () => setIncomingCall(null));
     newSocket.on("call:rejected", () => setIncomingCall(null));
@@ -85,13 +134,23 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     socketRef.current = newSocket;
     setSocket(newSocket);
 
+    // Reconnect on app foreground
+    const handleAppState = (nextState: AppStateStatus) => {
+      if (nextState === "active" && socketRef.current && !socketRef.current.connected) {
+        socketRef.current.connect();
+      }
+    };
+    const sub = AppState.addEventListener("change", handleAppState);
+
     return () => {
+      sub.remove();
+      stopHeartbeat();
       newSocket.disconnect();
       socketRef.current = null;
       setSocket(null);
       setIsConnected(false);
     };
-  }, [token]);
+  }, [token, startHeartbeat, stopHeartbeat]);
 
   const joinConversation = useCallback((conversationId: string) => {
     socketRef.current?.emit("conversation:join", { conversationId });
@@ -129,6 +188,14 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
   const clearIncomingCall = useCallback(() => setIncomingCall(null), []);
 
+  const enqueueMessage = useCallback((msg: QueuedMessage) => {
+    setMessageQueue((q) => [...q, msg]);
+  }, []);
+
+  const removeFromQueue = useCallback((tempId: string) => {
+    setMessageQueue((q) => q.filter((m) => m.tempId !== tempId));
+  }, []);
+
   return (
     <SocketContext.Provider
       value={{
@@ -137,6 +204,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         sendTyping, stopTyping,
         initiateCall, acceptCall, rejectCall, endCall,
         incomingCall, clearIncomingCall,
+        messageQueue, enqueueMessage, removeFromQueue,
       }}
     >
       {children}

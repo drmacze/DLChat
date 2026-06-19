@@ -78,6 +78,8 @@ export default function ChatRoomScreen() {
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
   const [localMessages, setLocalMessages] = useState<MessageItem[]>([]);
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const oldestMessageId = useRef<string | null>(null);
@@ -343,6 +345,101 @@ export default function ChatRoomScreen() {
     }
   }, [selectedMessage]);
 
+  const handleQuickReact = useCallback(async (messageId: string, emoji: string) => {
+    try {
+      const token = await getToken();
+      await fetch(`${BASE_URL}/api/messages/${messageId}/reactions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ emoji }),
+      });
+    } catch {}
+  }, []);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const exitSelectMode = useCallback(() => {
+    setIsSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const handleBulkDelete = useCallback(async () => {
+    if (selectedIds.size === 0) return;
+    Alert.alert("Hapus Pesan", `Hapus ${selectedIds.size} pesan?`, [
+      { text: "Batal", style: "cancel" },
+      {
+        text: "Hapus", style: "destructive", onPress: async () => {
+          try {
+            const token = await getToken();
+            await fetch(`${BASE_URL}/api/messages/bulk-delete`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ messageIds: [...selectedIds] }),
+            });
+            setLocalMessages((prev) => prev.map((m) =>
+              selectedIds.has(m.id)
+                ? { ...m, deletedAt: new Date().toISOString(), content: null, mediaUrl: null }
+                : m
+            ));
+            exitSelectMode();
+          } catch { Alert.alert("Error", "Tidak dapat menghapus pesan."); }
+        }
+      },
+    ]);
+  }, [selectedIds, exitSelectMode]);
+
+  const handleMuteFn = useCallback(() => {
+    Alert.alert("Bisukan Chat", "Pilih durasi:", [
+      { text: "1 jam", onPress: async () => { const t = await getToken(); await fetch(`${BASE_URL}/api/conversations/${conversationId}/mute`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${t}` }, body: JSON.stringify({ durationMinutes: 60 }) }); } },
+      { text: "8 jam", onPress: async () => { const t = await getToken(); await fetch(`${BASE_URL}/api/conversations/${conversationId}/mute`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${t}` }, body: JSON.stringify({ durationMinutes: 480 }) }); } },
+      { text: "Selalu", onPress: async () => { const t = await getToken(); await fetch(`${BASE_URL}/api/conversations/${conversationId}/mute`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${t}` }, body: JSON.stringify({ durationMinutes: -1 }) }); } },
+      { text: "Batal", style: "cancel" },
+    ]);
+  }, [conversationId]);
+
+  const handleArchiveFn = useCallback(() => {
+    Alert.alert("Arsipkan Chat", "Pindahkan percakapan ini ke arsip?", [
+      { text: "Batal", style: "cancel" },
+      { text: "Arsipkan", onPress: async () => {
+          try {
+            const t = await getToken();
+            await fetch(`${BASE_URL}/api/conversations/${conversationId}/archive`, { method: "POST", headers: { Authorization: `Bearer ${t}` } });
+            queryClient.invalidateQueries({ queryKey: ["conversations"] });
+            router.back();
+          } catch { Alert.alert("Error", "Tidak dapat mengarsipkan."); }
+      }},
+    ]);
+  }, [conversationId, queryClient]);
+
+  const handleClearHistoryFn = useCallback(() => {
+    Alert.alert("Hapus Riwayat", "Semua pesan akan dihapus. Tindakan ini tidak dapat dibatalkan.", [
+      { text: "Batal", style: "cancel" },
+      { text: "Hapus Semua", style: "destructive", onPress: async () => {
+          try {
+            const t = await getToken();
+            await fetch(`${BASE_URL}/api/conversations/${conversationId}/messages`, { method: "DELETE", headers: { Authorization: `Bearer ${t}` } });
+            setLocalMessages([]);
+          } catch { Alert.alert("Error", "Tidak dapat menghapus riwayat."); }
+      }},
+    ]);
+  }, [conversationId]);
+
+  const showMoreOptions = useCallback(() => {
+    Alert.alert("Opsi Chat", undefined, [
+      { text: "Pilih Pesan", onPress: () => setIsSelectMode(true) },
+      { text: "Bisukan Notifikasi", onPress: handleMuteFn },
+      { text: "Arsipkan Chat", onPress: handleArchiveFn },
+      { text: "Hapus Riwayat Chat", style: "destructive", onPress: handleClearHistoryFn },
+      { text: "Batal", style: "cancel" },
+    ]);
+  }, [handleMuteFn, handleArchiveFn, handleClearHistoryFn]);
+
   const handleLongPress = useCallback((msg: MessageItem) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setSelectedMessage(msg);
@@ -350,18 +447,20 @@ export default function ChatRoomScreen() {
   }, []);
 
   const handleCall = useCallback((callType: "voice" | "video") => {
-    if (!conversationId || !conv) return;
+    if (!conversationId || !convData) return;
     initiateCall(conversationId, callType);
     router.push({
       pathname: "/call/[conversationId]",
       params: {
         conversationId,
         type: callType,
-        displayName,
-        avatarUrl: otherUser?.avatarUrl ?? "",
+        displayName: (convData as any)?.type === "direct"
+          ? ((convData as any)?.members?.find((m: any) => m.userId !== user?.id)?.user?.displayName ?? "Chat")
+          : ((convData as any)?.title ?? "Group Chat"),
+        avatarUrl: (convData as any)?.members?.find((m: any) => m.userId !== user?.id)?.user?.avatarUrl ?? "",
       },
     } as any);
-  }, [conversationId, conv]);
+  }, [conversationId, convData, user?.id]);
 
   const conv = convData;
   const isAI = (conv as any)?.isAI === true;
@@ -388,11 +487,15 @@ export default function ChatRoomScreen() {
         message={item}
         isMe={isMe}
         showAvatar={showAvatar}
-        onLongPress={() => handleLongPress(item)}
+        onLongPress={isSelectMode ? undefined : () => handleLongPress(item)}
+        onReply={isSelectMode ? undefined : () => setReplyingTo(item)}
+        onQuickReact={isSelectMode ? undefined : (emoji) => handleQuickReact(item.id, emoji)}
+        onSelect={isSelectMode ? () => toggleSelect(item.id) : undefined}
+        isSelected={selectedIds.has(item.id)}
         currentUserId={user?.id}
       />
     );
-  }, [user?.id, filteredMessages, handleLongPress]);
+  }, [user?.id, filteredMessages, handleLongPress, isSelectMode, selectedIds, toggleSelect, handleQuickReact]);
 
   const reversedMessages = useMemo(() => [...filteredMessages].reverse(), [filteredMessages]);
 
@@ -400,42 +503,65 @@ export default function ChatRoomScreen() {
     <View style={[styles.container, { backgroundColor: c.background }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: c.sidebar, borderBottomColor: c.border, paddingTop: Platform.OS === "web" ? 67 : insets.top }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
-          <Feather name="arrow-left" size={22} color={c.foreground} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.headerProfile} onPress={() => otherUser && router.push(`/profile/${otherUser.id}` as any)} activeOpacity={0.8}>
-          <Avatar uri={otherUser?.avatarUrl} name={displayName} size={36} isOnline={otherUser?.isOnline} />
-          <View style={styles.headerInfo}>
-            <Text style={[styles.headerName, { color: c.foreground }]} numberOfLines={1}>{displayName}</Text>
-            <Text style={[styles.headerStatus, {
-              color: typingUsers.size > 0 ? c.primary
-                : otherUser?.isOnline ? c.online
-                : c.mutedForeground
-            }]} numberOfLines={1}>
-              {typingUsers.size > 0 ? "✏️ sedang mengetik..."
-                : otherUser?.isOnline ? "● Online"
-                : formatLastSeen(otherUser?.lastSeenAt)}
+        {isSelectMode ? (
+          <>
+            <TouchableOpacity onPress={exitSelectMode} style={styles.headerBtn}>
+              <Feather name="x" size={22} color={c.foreground} />
+            </TouchableOpacity>
+            <Text style={[styles.headerName, { color: c.foreground, flex: 1, paddingLeft: 4 }]}>
+              {selectedIds.size} dipilih
             </Text>
-          </View>
-        </TouchableOpacity>
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => setShowSearch((s) => !s)}>
-            <Feather name={showSearch ? "x" : "search"} size={20} color={c.foreground} />
-          </TouchableOpacity>
-          {!isAI && (
-            <>
-              <TouchableOpacity style={styles.headerBtn} onPress={() => handleCall("voice")}>
-                <Feather name="phone" size={20} color={c.primary} />
+            <TouchableOpacity
+              style={styles.headerBtn}
+              onPress={handleBulkDelete}
+              disabled={selectedIds.size === 0}
+            >
+              <Feather name="trash-2" size={20} color={selectedIds.size > 0 ? (c.danger as string) : (c.mutedForeground as string)} />
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
+              <Feather name="arrow-left" size={22} color={c.foreground} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerProfile} onPress={() => otherUser && router.push(`/profile/${otherUser.id}` as any)} activeOpacity={0.8}>
+              <Avatar uri={otherUser?.avatarUrl} name={displayName} size={36} isOnline={otherUser?.isOnline} />
+              <View style={styles.headerInfo}>
+                <Text style={[styles.headerName, { color: c.foreground }]} numberOfLines={1}>{displayName}</Text>
+                <Text style={[styles.headerStatus, {
+                  color: typingUsers.size > 0 ? c.primary
+                    : otherUser?.isOnline ? c.online
+                    : c.mutedForeground
+                }]} numberOfLines={1}>
+                  {typingUsers.size > 0 ? "✏️ sedang mengetik..."
+                    : otherUser?.isOnline ? "● Online"
+                    : formatLastSeen(otherUser?.lastSeenAt)}
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <TouchableOpacity style={styles.headerBtn} onPress={() => setShowSearch((s) => !s)}>
+                <Feather name={showSearch ? "x" : "search"} size={20} color={c.foreground} />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.headerBtn} onPress={() => handleCall("video")}>
-                <Feather name="video" size={20} color={c.primary} />
+              {!isAI && (
+                <>
+                  <TouchableOpacity style={styles.headerBtn} onPress={() => handleCall("voice")}>
+                    <Feather name="phone" size={20} color={c.primary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.headerBtn} onPress={() => handleCall("video")}>
+                    <Feather name="video" size={20} color={c.primary} />
+                  </TouchableOpacity>
+                </>
+              )}
+              <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/starred-messages" as any)}>
+                <Feather name="star" size={20} color={c.foreground} />
               </TouchableOpacity>
-            </>
-          )}
-          <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/starred-messages" as any)}>
-            <Feather name="star" size={20} color={c.foreground} />
-          </TouchableOpacity>
-        </View>
+              <TouchableOpacity style={styles.headerBtn} onPress={showMoreOptions}>
+                <Feather name="more-vertical" size={20} color={c.foreground} />
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </View>
 
       {/* Search Bar */}
@@ -519,28 +645,53 @@ export default function ChatRoomScreen() {
           />
         )}
 
-        {replyingTo && (
-          <View style={[styles.replyBar, { backgroundColor: c.surface, borderTopColor: c.border }]}>
-            <View style={[styles.replyBarLine, { backgroundColor: c.primary }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.replyBarName, { color: c.primary }]}>
-                Membalas {replyingTo.sender.displayName}
-              </Text>
-              <Text style={[styles.replyBarContent, { color: c.mutedForeground }]} numberOfLines={1}>
-                {replyingTo.content ?? (replyingTo.type !== "text" ? `[${replyingTo.type}]` : "Media")}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={() => setReplyingTo(null)} style={styles.replyBarClose}>
-              <Feather name="x" size={18} color={c.mutedForeground} />
+        {isSelectMode ? (
+          <View style={[styles.selectToolbar, { backgroundColor: c.sidebar, borderTopColor: c.border }]}>
+            <TouchableOpacity style={styles.selectToolbarBtn} onPress={exitSelectMode}>
+              <Feather name="x" size={20} color={c.foreground} />
+              <Text style={[styles.selectToolbarText, { color: c.foreground }]}>Batal</Text>
+            </TouchableOpacity>
+            <Text style={[styles.selectCount, { color: c.foreground }]}>{selectedIds.size} dipilih</Text>
+            <TouchableOpacity
+              style={[styles.selectToolbarBtn, selectedIds.size === 0 && { opacity: 0.35 }]}
+              onPress={handleBulkDelete}
+              disabled={selectedIds.size === 0}
+            >
+              <Feather name="trash-2" size={20} color={c.danger} />
+              <Text style={[styles.selectToolbarText, { color: c.danger }]}>Hapus</Text>
             </TouchableOpacity>
           </View>
+        ) : (
+          <>
+            {replyingTo && (
+              <View style={[styles.replyBar, { backgroundColor: c.surface, borderTopColor: c.border }]}>
+                <View style={[styles.replyBarLine, { backgroundColor: c.primary }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.replyBarName, { color: c.primary }]}>
+                    Membalas {replyingTo.sender.displayName}
+                  </Text>
+                  <Text style={[styles.replyBarContent, { color: c.mutedForeground }]} numberOfLines={1}>
+                    {replyingTo.content ?? (replyingTo.type !== "text" ? `[${replyingTo.type}]` : "Media")}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => setReplyingTo(null)} style={styles.replyBarClose}>
+                  <Feather name="x" size={18} color={c.mutedForeground} />
+                </TouchableOpacity>
+              </View>
+            )}
+            <MessageInput
+              onSend={handleSend}
+              onTyping={() => sendTyping(conversationId!)}
+              onStopTyping={() => stopTyping(conversationId!)}
+              conversationId={conversationId}
+              members={(conv?.members ?? []).map((m: any) => ({
+                id: m.userId,
+                displayName: m.user?.displayName ?? "User",
+                avatarUrl: m.user?.avatarUrl ?? null,
+              }))}
+            />
+          </>
         )}
-
-        <MessageInput
-          onSend={handleSend}
-          onTyping={() => sendTyping(conversationId!)}
-          onStopTyping={() => stopTyping(conversationId!)}
-        />
       </KeyboardAvoidingView>
 
       {/* Message Actions Modal */}
@@ -614,4 +765,11 @@ const styles = StyleSheet.create({
   replyBarName: { fontSize: 13, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
   replyBarContent: { fontSize: 12, fontFamily: "Inter_400Regular" },
   replyBarClose: { padding: 4 },
+  selectToolbar: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 24, paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  selectToolbarBtn: { flexDirection: "row", alignItems: "center", gap: 6 },
+  selectToolbarText: { fontSize: 14, fontFamily: "Inter_500Medium" },
+  selectCount: { fontSize: 16, fontFamily: "Inter_700Bold" },
 });

@@ -9,7 +9,7 @@ import {
   blockedUsers,
   messageStatus,
 } from "@workspace/db";
-import { eq, and, desc, isNull, sql, or, gt } from "drizzle-orm";
+import { eq, and, desc, isNull, sql, or } from "drizzle-orm";
 import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 import { broadcastMessage } from "../socket/index.js";
@@ -43,13 +43,78 @@ async function getMembership(conversationId: string, userId: string) {
   return member;
 }
 
+// GET /saved — must be before /:conversationId
+router.get("/saved", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const existing = await db.execute(sql`
+      SELECT conversation_id FROM saved_messages WHERE user_id = ${req.userId}
+    `);
+    if (existing.rows.length > 0) {
+      const convId = (existing.rows[0] as { conversation_id: string }).conversation_id;
+      return await getConvDetail(convId, req.userId!, res);
+    }
+    const [conv] = await db.insert(conversations).values({
+      type: "direct",
+      title: "Pesan Tersimpan",
+      createdBy: req.userId!,
+    }).returning();
+    await db.insert(conversationMembers).values({
+      conversationId: conv.id,
+      userId: req.userId!,
+      role: "owner",
+    });
+    await db.execute(sql`
+      INSERT INTO saved_messages (user_id, conversation_id) VALUES (${req.userId}, ${conv.id})
+      ON CONFLICT (user_id) DO UPDATE SET conversation_id = ${conv.id}
+    `);
+    return await getConvDetail(conv.id, req.userId!, res);
+  } catch (err) {
+    logger.error({ err }, "Saved messages error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// POST /join/:inviteCode — must be before /:conversationId
+router.post("/join/:inviteCode", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const result = await db.execute(sql`
+      SELECT conversation_id FROM channel_invites
+      WHERE invite_code = ${req.params.inviteCode}
+      AND (expires_at IS NULL OR expires_at > NOW())
+    `);
+    if (!result.rows.length) {
+      res.status(404).json({ error: "Undangan tidak valid atau sudah kadaluarsa" });
+      return;
+    }
+    const row = result.rows[0] as { conversation_id: string };
+    await db.insert(conversationMembers).values({
+      conversationId: row.conversation_id,
+      userId: req.userId!,
+      role: "member",
+    }).onConflictDoNothing();
+    return await getConvDetail(row.conversation_id, req.userId!, res);
+  } catch (err) {
+    logger.error({ err }, "Join invite error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 router.get("/", requireAuth, async (req: AuthRequest, res) => {
   try {
+    const showArchived = req.query.archived === "true";
+
     const myConvs = await db
       .select({ conv: conversations, member: conversationMembers })
       .from(conversationMembers)
       .innerJoin(conversations, eq(conversationMembers.conversationId, conversations.id))
-      .where(eq(conversationMembers.userId, req.userId!))
+      .where(
+        and(
+          eq(conversationMembers.userId, req.userId!),
+          showArchived
+            ? sql`${conversationMembers.archivedAt} IS NOT NULL`
+            : sql`${conversationMembers.archivedAt} IS NULL`
+        )
+      )
       .orderBy(desc(conversations.updatedAt));
 
     const result = await Promise.all(
@@ -86,6 +151,20 @@ router.get("/", requireAuth, async (req: AuthRequest, res) => {
           memberCount = count?.count ?? 0;
         }
 
+        const [{ count: unreadCount }] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(messages)
+          .where(
+            and(
+              eq(messages.conversationId, conv.id),
+              isNull(messages.deletedAt),
+              sql`${messages.id} NOT IN (
+                SELECT message_id FROM message_status
+                WHERE user_id = ${req.userId!}::uuid AND status = 'read'
+              )`
+            )
+          );
+
         return {
           id: conv.id,
           type: conv.type,
@@ -100,24 +179,10 @@ router.get("/", requireAuth, async (req: AuthRequest, res) => {
                 createdAt: lastMsg.msg.createdAt.toISOString(),
               }
             : null,
-          unreadCount: await (async () => {
-            const [{ count }] = await db
-              .select({ count: sql<number>`count(*)::int` })
-              .from(messages)
-              .where(
-                and(
-                  eq(messages.conversationId, conv.id),
-                  isNull(messages.deletedAt),
-                  sql`${messages.id} NOT IN (
-                    SELECT message_id FROM message_status
-                    WHERE user_id = ${req.userId!}::uuid AND status = 'read'
-                  )`
-                )
-              );
-            return count ?? 0;
-          })(),
+          unreadCount: unreadCount ?? 0,
           isPinned: !!member.pinnedAt,
           isMuted: !!(member.mutedUntil && member.mutedUntil > new Date()),
+          isArchived: !!member.archivedAt,
           otherUser,
           memberCount,
           updatedAt: conv.updatedAt.toISOString(),
@@ -170,7 +235,7 @@ router.post("/direct", requireAuth, async (req: AuthRequest, res) => {
           and(
             eq(conversationMembers.userId, targetUserId),
             eq(conversations.type, "direct"),
-            sql`${conversationMembers.conversationId} = ANY(${sql.raw(`'{${myConvIds.join(",")}}'::uuid[]`)})` 
+            sql`${conversationMembers.conversationId} = ANY(${sql.raw(`'{${myConvIds.join(",")}}'::uuid[]`)})`
           )
         )
         .limit(1);
@@ -223,7 +288,7 @@ router.post("/group", requireAuth, async (req: AuthRequest, res) => {
     const systemMsg = await db.insert(messages).values({
       conversationId: conv.id,
       type: "system",
-      content: `Group "${body.title}" created`,
+      content: `Group "${body.title}" dibuat`,
     }).returning();
 
     broadcastMessage(conv.id, { type: "system", message: systemMsg[0] });
@@ -303,6 +368,9 @@ async function getConvDetail(convId: string, userId: string, res: Response) {
       user: userPublic(m.user),
     })),
     myRole: myMember?.member.role ?? "member",
+    isPinned: !!myMember?.member.pinnedAt,
+    isMuted: !!(myMember?.member.mutedUntil && myMember.member.mutedUntil > new Date()),
+    isArchived: !!myMember?.member.archivedAt,
   });
 }
 
@@ -387,6 +455,130 @@ router.post("/:conversationId/leave", requireAuth, async (req: AuthRequest, res)
     res.json({ success: true });
   } catch (err) {
     logger.error({ err }, "Leave conv error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// POST /:conversationId/mute — toggle mute (durationMinutes: 0=unmute, 60, 480, 10080, -1=forever)
+router.post("/:conversationId/mute", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const { durationMinutes } = z.object({ durationMinutes: z.number().optional() }).parse(req.body);
+    const member = await getMembership(String(req.params.conversationId), req.userId!);
+    if (!member) { res.status(403).json({ error: "Not a member" }); return; }
+
+    let mutedUntil: Date | null = null;
+    const dur = durationMinutes ?? 60;
+    if (dur === 0) {
+      mutedUntil = null;
+    } else if (dur === -1) {
+      mutedUntil = new Date("2099-12-31");
+    } else {
+      mutedUntil = new Date(Date.now() + dur * 60 * 1000);
+    }
+
+    await db.update(conversationMembers)
+      .set({ mutedUntil })
+      .where(and(
+        eq(conversationMembers.conversationId, String(req.params.conversationId)),
+        eq(conversationMembers.userId, req.userId!)
+      ));
+
+    res.json({ success: true, isMuted: !!mutedUntil, mutedUntil: mutedUntil?.toISOString() ?? null });
+  } catch (err) {
+    logger.error({ err }, "Mute conversation error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// POST /:conversationId/archive — toggle archive
+router.post("/:conversationId/archive", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const member = await getMembership(String(req.params.conversationId), req.userId!);
+    if (!member) { res.status(403).json({ error: "Not a member" }); return; }
+
+    const isNowArchived = !member.archivedAt;
+    await db.update(conversationMembers)
+      .set({ archivedAt: isNowArchived ? new Date() : null })
+      .where(and(
+        eq(conversationMembers.conversationId, String(req.params.conversationId)),
+        eq(conversationMembers.userId, req.userId!)
+      ));
+
+    res.json({ success: true, isArchived: isNowArchived });
+  } catch (err) {
+    logger.error({ err }, "Archive conversation error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// POST /:conversationId/pin-chat — toggle pin in chat list
+router.post("/:conversationId/pin-chat", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const member = await getMembership(String(req.params.conversationId), req.userId!);
+    if (!member) { res.status(403).json({ error: "Not a member" }); return; }
+
+    const isNowPinned = !member.pinnedAt;
+    await db.update(conversationMembers)
+      .set({ pinnedAt: isNowPinned ? new Date() : null })
+      .where(and(
+        eq(conversationMembers.conversationId, String(req.params.conversationId)),
+        eq(conversationMembers.userId, req.userId!)
+      ));
+
+    res.json({ success: true, isPinned: isNowPinned });
+  } catch (err) {
+    logger.error({ err }, "Pin chat error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// DELETE /:conversationId/messages — clear chat history
+router.delete("/:conversationId/messages", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const member = await getMembership(String(req.params.conversationId), req.userId!);
+    if (!member) { res.status(403).json({ error: "Not a member" }); return; }
+
+    const { forAll } = z.object({ forAll: z.boolean().optional() }).parse(req.body ?? {});
+
+    if (forAll && (member.role === "owner" || member.role === "admin")) {
+      await db.update(messages)
+        .set({ deletedAt: new Date() })
+        .where(and(
+          eq(messages.conversationId, String(req.params.conversationId)),
+          isNull(messages.deletedAt)
+        ));
+    } else {
+      await db.update(messages)
+        .set({ deletedAt: new Date() })
+        .where(and(
+          eq(messages.conversationId, String(req.params.conversationId)),
+          eq(messages.senderId, req.userId!),
+          isNull(messages.deletedAt)
+        ));
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, "Clear chat history error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// POST /:conversationId/invite-link — generate group invite link
+router.post("/:conversationId/invite-link", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const member = await getMembership(String(req.params.conversationId), req.userId!);
+    if (!member) { res.status(403).json({ error: "Not a member" }); return; }
+
+    const code = Math.random().toString(36).substring(2, 8) + Math.random().toString(36).substring(2, 8);
+    await db.execute(sql`
+      INSERT INTO channel_invites (conversation_id, invite_code, created_by)
+      VALUES (${req.params.conversationId}, ${code}, ${req.userId})
+    `);
+
+    res.json({ success: true, inviteCode: code, inviteLink: `dlchat://invite/${code}` });
+  } catch (err) {
+    logger.error({ err }, "Create invite link error");
     res.status(500).json({ error: "Server error" });
   }
 });

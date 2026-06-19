@@ -16,6 +16,7 @@ import streakRouter from "./streak.js";
 import botRouter from "./bot.js";
 import storageRouter from "./storage.js";
 import pollsRouter from "./polls.js";
+import linkPreviewRouter from "./linkpreview.js";
 
 const router: IRouter = Router();
 
@@ -36,6 +37,7 @@ router.use("/streak", streakRouter);
 router.use("/bot", botRouter);
 router.use(storageRouter);
 router.use("/polls", pollsRouter);
+router.use("/", linkPreviewRouter);
 router.use("/", reportsRouter);
 
 export default router;

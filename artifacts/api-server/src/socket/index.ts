@@ -10,7 +10,7 @@ import {
   messageStatus,
   notifications,
 } from "@workspace/db";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 
 let io: SocketServer;
@@ -24,9 +24,10 @@ export function setupSocket(server: HttpServer) {
   io = new SocketServer(server, {
     cors: { origin: "*", credentials: true },
     transports: ["websocket", "polling"],
+    pingTimeout: 60000,
+    pingInterval: 25000,
   });
 
-  // Typing timeout safety: auto-stop after 5s if client disconnects mid-type
   const typingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
   io.use(async (socket: AuthSocket, next) => {
@@ -69,20 +70,60 @@ export function setupSocket(server: HttpServer) {
     await db.update(users).set({ isOnline: true }).where(eq(users.id, userId));
     socket.broadcast.emit("user:online", { userId });
 
-    socket.on("conversation:join", async ({ conversationId }: { conversationId: string }) => {
-      const [member] = await db
-        .select()
-        .from(conversationMembers)
-        .where(
-          and(
-            eq(conversationMembers.conversationId, conversationId),
-            eq(conversationMembers.userId, userId)
-          )
-        )
-        .limit(1);
+    // ── Application-level heartbeat ──────────────────────────────────────────
+    socket.on("ping", () => {
+      socket.emit("pong", { ts: Date.now() });
+    });
 
-      if (member) {
-        await socket.join(`conv:${conversationId}`);
+    socket.on("conversation:join", async ({ conversationId }: { conversationId: string }) => {
+      try {
+        const [member] = await db
+          .select()
+          .from(conversationMembers)
+          .where(
+            and(
+              eq(conversationMembers.conversationId, conversationId),
+              eq(conversationMembers.userId, userId)
+            )
+          )
+          .limit(1);
+
+        if (member) {
+          await socket.join(`conv:${conversationId}`);
+
+          // Mark unread messages as "delivered" for this user
+          const undelivered = await db.execute(sql`
+            SELECT m.id, m.sender_id
+            FROM messages m
+            WHERE m.conversation_id = ${conversationId}
+              AND m.deleted_at IS NULL
+              AND m.sender_id != ${userId}
+              AND m.id NOT IN (
+                SELECT message_id FROM message_status
+                WHERE user_id = ${userId}::uuid
+              )
+            ORDER BY m.created_at DESC
+            LIMIT 50
+          `);
+
+          if (undelivered.rows.length > 0) {
+            const msgIds = undelivered.rows.map((r) => (r as { id: string }).id);
+            await db.execute(sql`
+              INSERT INTO message_status (message_id, user_id, status)
+              SELECT unnest(${msgIds}::uuid[]), ${userId}::uuid, 'delivered'
+              ON CONFLICT (message_id, user_id) DO NOTHING
+            `);
+
+            // Notify senders that messages were delivered
+            socket.to(`conv:${conversationId}`).emit("message:delivered", {
+              conversationId,
+              messageIds: msgIds,
+              deliveredTo: userId,
+            });
+          }
+        }
+      } catch (err) {
+        logger.error({ err }, "conversation:join error");
       }
     });
 
@@ -95,7 +136,6 @@ export function setupSocket(server: HttpServer) {
       const existing = typingTimeouts.get(key);
       if (existing) clearTimeout(existing);
       socket.to(`conv:${conversationId}`).emit("typing:start", { userId, conversationId });
-      // Auto-stop if client disconnects or forgets to send stop
       const timeout = setTimeout(() => {
         socket.to(`conv:${conversationId}`).emit("typing:stop", { userId, conversationId });
         typingTimeouts.delete(key);
@@ -118,7 +158,6 @@ export function setupSocket(server: HttpServer) {
             target: [messageStatus.messageId, messageStatus.userId],
             set: { status: "read", updatedAt: new Date() },
           });
-        // Notify sender that message was read
         if (conversationId) {
           const [msg] = await db.select({ senderId: messages.senderId })
             .from(messages).where(eq(messages.id, messageId)).limit(1);
@@ -168,14 +207,12 @@ export function setupSocket(server: HttpServer) {
       socket.to(`conv:${conversationId}`).emit("call:busy", { conversationId, userId });
     });
 
-    // ── Message Pin ──────────────────────────────────────────────────────────
     socket.on("message:pin", ({ conversationId, messageId, isPinned }: { conversationId: string; messageId: string; isPinned: boolean }) => {
       socket.to(`conv:${conversationId}`).emit("message:pin", { conversationId, messageId, isPinned });
     });
 
     socket.on("disconnect", async () => {
       logger.info({ userId }, "Socket disconnected");
-      // Clear all typing indicators for this user
       for (const [key, timeout] of typingTimeouts.entries()) {
         if (key.startsWith(`${userId}:`)) {
           clearTimeout(timeout);

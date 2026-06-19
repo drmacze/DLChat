@@ -5,3 +5,4 @@
 - [DLChat Color Tokens](dlchat-color-tokens.md) — no secondarySurface; use c.surface for reply bg, c.messageThemBg for received bubbles, c.messageMeGradient for sent
 - [DLChat SVG Icons & Storage](dlchat-icons-storage.md) — SvgIcons.tsx replaces all UI emojis; BASE_URL from utils/api.ts; App Storage wired at /api/storage/*; permanent domain via EXPO_PUBLIC_API_URL
 - [DLChat Auth Query Guard](dlchat-auth-query-guard.md) — all tab screen queries need enabled: !!token; Expo Router pre-renders tabs causing 401 without this guard
+- [DLChat Premium Features](dlchat-premium.md) — Full premium bundle: swipe-reply/quick-react in MessageBubble; drafts/mentions/camera/compress in MessageInput; archive filter + swipe in chats; bulk-delete + mute/archive/clear in chat screen
