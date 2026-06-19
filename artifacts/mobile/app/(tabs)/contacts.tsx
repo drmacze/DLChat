@@ -18,8 +18,23 @@ import { BASE_URL } from "@/utils/api";
 const MOOD_EMOJI: Record<string, string> = {
   happy: "😄", chill: "😎", playful: "🤪", flirty: "😏", sad: "🥺", excited: "🔥", tired: "😪", sarcastic: "🙃",
 };
+const MOOD_COLORS: Record<string, readonly [string, string]> = {
+  happy:     ["#FFD60A", "#FF9500"],
+  chill:     ["#30D5C8", "#007AFF"],
+  playful:   ["#FF6B35", "#F7B731"],
+  flirty:    ["#FF2D55", "#FF6B9D"],
+  sad:       ["#5B8CFF", "#3A5EC8"],
+  excited:   ["#FF5722", "#FF9800"],
+  tired:     ["#8E8E93", "#636366"],
+  sarcastic: ["#BF5AF2", "#9B59B6"],
+};
 const COUNTRY_FLAG: Record<string, string> = {
   id: "🇮🇩", us: "🇺🇸", sg: "🇸🇬", jp: "🇯🇵", in: "🇮🇳", br: "🇧🇷", de: "🇩🇪", uk: "🇬🇧",
+};
+const PERSONALITY_COLOR: Record<string, string> = {
+  bubbly: "#FF6B9D", chill: "#30D5C8", mysterious: "#9B59B6",
+  nerdy: "#3498DB", sporty: "#2ECC71", artsy: "#E67E22",
+  romantic: "#FF2D55", adventurous: "#F39C12", witty: "#9B59B6", empathetic: "#27AE60",
 };
 
 interface AIPersona { id: string; name: string; country: string; gender: string; age: number; avatarEmoji: string; mood: string; personality: string; }
@@ -42,27 +57,39 @@ export default function ContactsScreen() {
   const contacts = data?.contacts ?? [];
   const aiContacts: AIPersona[] = aiData?.contacts ?? [];
 
-  const AIContactCard = ({ item }: { item: AIPersona }) => (
-    <TouchableOpacity
-      style={[styles.aiCard, { backgroundColor: c.surface, borderColor: c.glassBorder }]}
-      onPress={() => router.push(`/ai-chat/${item.id}`)}
-      activeOpacity={0.75}
-    >
-      <LinearGradient colors={c.aiGradient} style={styles.aiAvatarBg} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-        <Text style={{ fontSize: 22 }}>{item.avatarEmoji}</Text>
-      </LinearGradient>
-      <Text style={[styles.aiName, { color: c.foreground }]} numberOfLines={1}>{item.name}</Text>
-      <View style={styles.aiMeta}>
-        {COUNTRY_FLAG[item.country] ? (
-          <Text style={{ fontSize: 12 }}>{COUNTRY_FLAG[item.country]}</Text>
-        ) : (
-          <GlobeIcon size={14} />
-        )}
-        <Text style={{ fontSize: 12 }}>{MOOD_EMOJI[item.mood] ?? "😊"}</Text>
-      </View>
-      <Text style={[styles.aiAge, { color: c.mutedForeground }]}>{item.age}y</Text>
-    </TouchableOpacity>
-  );
+  const AIContactCard = ({ item }: { item: AIPersona }) => {
+    const moodCols = MOOD_COLORS[item.mood] ?? MOOD_COLORS.happy;
+    const personaColor = PERSONALITY_COLOR[item.personality] ?? c.primary;
+    return (
+      <TouchableOpacity
+        style={[styles.aiCard, { backgroundColor: c.surface, borderColor: c.glassBorder }]}
+        onPress={() => router.push(`/ai-chat/${item.id}`)}
+        activeOpacity={0.75}
+      >
+        <View style={[styles.aiAvatarRing, { borderColor: moodCols[0] + "70" }]}>
+          <LinearGradient colors={moodCols as unknown as [string, string]} style={styles.aiAvatarBg} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+            <Text style={{ fontSize: 22 }}>{item.avatarEmoji}</Text>
+          </LinearGradient>
+        </View>
+        <View style={styles.aiMoodPill}>
+          <Text style={{ fontSize: 9 }}>{MOOD_EMOJI[item.mood] ?? "😊"}</Text>
+          <Text style={[styles.aiMoodText, { color: moodCols[0] }]}>{item.mood}</Text>
+        </View>
+        <Text style={[styles.aiName, { color: c.foreground }]} numberOfLines={1}>{item.name}</Text>
+        <View style={[styles.aiPersonalityTag, { backgroundColor: personaColor + "18" }]}>
+          <Text style={[styles.aiPersonalityText, { color: personaColor }]} numberOfLines={1}>{item.personality}</Text>
+        </View>
+        <View style={styles.aiMeta}>
+          {COUNTRY_FLAG[item.country] ? (
+            <Text style={{ fontSize: 11 }}>{COUNTRY_FLAG[item.country]}</Text>
+          ) : (
+            <GlobeIcon size={12} />
+          )}
+          <Text style={[styles.aiAge, { color: c.mutedForeground }]}>{item.age}y</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
@@ -167,11 +194,16 @@ const styles = StyleSheet.create({
   sectionIconBg: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   sectionTitle: { fontSize: 17, fontWeight: "700", fontFamily: "Inter_700Bold", flex: 1 },
   sectionSub: { fontSize: 12, fontFamily: "Inter_400Regular" },
-  aiCard: { width: 90, borderRadius: 16, padding: 12, alignItems: "center", gap: 6, borderWidth: 1 },
+  aiCard: { width: 100, borderRadius: 18, padding: 10, alignItems: "center", gap: 5, borderWidth: 1 },
+  aiAvatarRing: { width: 52, height: 52, borderRadius: 26, borderWidth: 2.5, alignItems: "center", justifyContent: "center", marginBottom: 2 },
   aiAvatarBg: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
-  aiName: { fontSize: 13, fontWeight: "600", fontFamily: "Inter_600SemiBold", textAlign: "center" },
-  aiMeta: { flexDirection: "row", gap: 4 },
-  aiAge: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  aiMoodPill: { flexDirection: "row", alignItems: "center", gap: 2, marginBottom: 1 },
+  aiMoodText: { fontSize: 9, fontWeight: "600", fontFamily: "Inter_600SemiBold", textTransform: "capitalize" },
+  aiName: { fontSize: 13, fontWeight: "700", fontFamily: "Inter_700Bold", textAlign: "center" },
+  aiPersonalityTag: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8 },
+  aiPersonalityText: { fontSize: 9, fontWeight: "600", fontFamily: "Inter_600SemiBold", textTransform: "capitalize" },
+  aiMeta: { flexDirection: "row", gap: 4, alignItems: "center" },
+  aiAge: { fontSize: 10, fontFamily: "Inter_400Regular" },
   aiEmpty: { paddingHorizontal: 16, paddingVertical: 8, fontSize: 13, fontFamily: "Inter_400Regular" },
   realContactsHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, gap: 8 },
   contact: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, gap: 12 },

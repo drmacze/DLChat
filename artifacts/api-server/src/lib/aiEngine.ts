@@ -118,11 +118,17 @@ type Intent =
   | "question_why" | "question_how" | "question_when" | "weather"
   | "future_plans" | "family" | "pet" | "sport" | "fashion" | "tech"
   | "social_media" | "travel" | "health" | "goodbye" | "miss_you"
-  | "joke" | "debate" | "agree" | "disagree" | "surprise" | "general";
+  | "joke" | "debate" | "agree" | "disagree" | "surprise" | "short_message" | "general";
 
 function detectIntent(text: string, history: Array<{ role: string; content: string }>): Intent {
   const t = text.toLowerCase().trim();
   const prevAI = history.filter(m => m.role === "ai").slice(-1)[0]?.content?.toLowerCase() ?? "";
+
+  // Very short / ambiguous messages — catch BEFORE all other intents
+  const _wc = t.split(/\s+/).filter(Boolean).length;
+  if (/^(test|tes|coba|cobain|testing|hm+|hmm+|umm*|em+|eh+|oh+|ah+|ng|p+|weh|wei|woi|hai hai)$/.test(t)) return "short_message";
+  if (_wc === 1 && t.length <= 5 && !/[a-z]{4,}/.test(t)) return "short_message";
+  if (_wc <= 2 && t.length <= 8 && !/[?!]/.test(t) && !/\b(hai|hi|hey|halo|hei|oke|iya|ok)\b/.test(t) && /^[a-z ]{1,8}$/.test(t) && !/[aeiou]{2,}/.test(t)) return "short_message";
 
   // Greetings
   if (/^(hai|halo|hi|hey|hello|hei|p+|hy|yo|sup|hii+|heii+|heyy+|halloooo|woi|woii)\b/.test(t)) return "greeting";
@@ -1012,6 +1018,17 @@ function buildIDResponsePools(persona: AIPersona, history: Array<{ role: string;
         `Sungguh mengejutkan. 🙃 wkwk kidding tapi beneran tho~`,
       ],
     } as MoodPool,
+
+    short_message: {
+      happy: ["Hmm? 😄", "Eh, maksudnya apa tuh?", "Haha ga ngerti~", "Apaan tuh wkwk? 😂", "Ha? Coba lagi dong hehe"],
+      chill: ["Hmm~", "Eh?", "Oke... terus?", "Ha?", "Ga ngerti nih~"],
+      playful: ["Apaan tuh?? 😄", "Hah? Coba lagi~", "Hmm aku bingung 😂", "Nani?! 👀", "Maksudnya apa coba~"],
+      flirty: ["Hmm, misteri banget nih~ 😏", "Eh maksudnya apa tuh? Bikin penasaran 👀"],
+      sad: ["Hmm... aku ga terlalu ngerti 🥺", "Eh, maksudnya apa ya?"],
+      tired: ["Hmm... maaf lagi agak lambat nangkepnya 😴", "Eh? Coba ulangi ya~"],
+      excited: ["APAAN TUH?! 🔥 Coba jelasin~", "Eh menarik! Maksudnya gimana?"],
+      sarcastic: ["Oh wow, cryptic sekali 🙃", "Berarti apa? Aku bukan mind reader wkwk"],
+    } as MoodPool,
   };
 }
 
@@ -1145,6 +1162,17 @@ function buildENResponsePools(persona: AIPersona) {
       happy: [`Gotcha!`, `Sounds good!`, `Noted! 👌`, `Sure thing! 😊`],
       chill: [`Cool~`, `Noted 😌`],
     } as MoodPool,
+
+    short_message: {
+      happy: ["Hmm? 😄", "What does that mean?", "Haha I'm confused~", "Wdym? 😂", "Care to elaborate? hehe"],
+      chill: ["Hmm~", "Eh?", "Ok... and?", "Ha?", "Not sure what you mean~"],
+      playful: ["What was that?? 😄", "Huh? Try again~", "I'm so confused rn 😂", "Nani?! 👀"],
+      flirty: ["Hmm, mysterious~ 😏", "What do you mean? Now I'm curious 👀"],
+      sad: ["Hmm... I'm not sure I got that 🥺", "Eh, what do you mean?"],
+      tired: ["Hmm... sorry, brain is slow rn 😴", "Eh? Can you say that again~"],
+      excited: ["WAIT WHAT?! 🔥 Explain please~", "Hmm interesting! What do you mean?"],
+      sarcastic: ["Oh wow, very cryptic 🙃", "And that means...? I'm not a mind reader lol"],
+    } as MoodPool,
   };
 }
 
@@ -1227,7 +1255,7 @@ export function generateAIResponse(
   }
 
   // Occasionally add a follow-up question to keep conversation flowing
-  if (Math.random() < 0.25 && !content.includes("?") && intent !== "goodbye" && intent !== "sleep") {
+  if (Math.random() < 0.25 && !content.includes("?") && intent !== "goodbye" && intent !== "sleep" && intent !== "short_message" && userMessage.length > 12) {
     const followUps = isID
       ? ["kamu gimana?", "kamu sendiri?", "cerita dong lebih~", "beneran?", "interesting~ ada lagi?", "kamu setuju ga?"]
       : ["what about you?", "how about yourself?", "tell me more~", "really?", "agree?", "what do you think?"];
