@@ -26,7 +26,11 @@ export default function StoryBar({ stories, onPress, onAddStory, myUser }: Story
         contentContainerStyle={styles.scroll}
       >
         {myUser && (
-          <TouchableOpacity style={styles.item} onPress={onAddStory} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.item}
+            onPress={() => myStory ? onPress(myUser.id) : onAddStory?.()}
+            activeOpacity={0.7}
+          >
             <View
               style={[
                 styles.ring,
