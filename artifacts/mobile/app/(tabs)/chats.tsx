@@ -7,6 +7,7 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Search, Bell, MessageSquareDashed, Archive } from "lucide-react-native";
+import { Feather } from "@expo/vector-icons";
 import Reanimated, { FadeInDown } from "react-native-reanimated";
 import { useGetConversations } from "@workspace/api-client-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -89,6 +90,7 @@ export default function ChatsScreen() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   const [showArchived, setShowArchived] = useState(false);
+  const [showFabMenu, setShowFabMenu] = useState(false);
 
   const { data, isLoading, refetch, isRefetching, error } = useGetConversations({
     query: { queryKey: ["conversations", showArchived], enabled: !!token },
@@ -258,7 +260,27 @@ export default function ChatsScreen() {
 
       {!showArchived && (
         <View style={[styles.fab, { bottom: Platform.OS === "web" ? 100 : insets.bottom + 65 }]}>
-          <FloatingActionButton onPress={() => router.push("/search")} icon="edit" size={56} />
+          <FloatingActionButton
+            onPress={() => setShowFabMenu((v) => !v)}
+            icon={showFabMenu ? "x" : "edit-2"}
+            size={56}
+          />
+          {showFabMenu && (
+            <View style={[fabMenuStyles.menu, { backgroundColor: c.surface, borderColor: c.border }]}>
+              <TouchableOpacity style={fabMenuStyles.item} onPress={() => { setShowFabMenu(false); router.push("/search"); }}>
+                <View style={[fabMenuStyles.icon, { backgroundColor: c.primary + "22" }]}>
+                  <Feather name="message-circle" size={18} color={c.primary} />
+                </View>
+                <Text style={[fabMenuStyles.label, { color: c.foreground }]}>Chat Baru</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={fabMenuStyles.item} onPress={() => { setShowFabMenu(false); router.push("/new-group" as any); }}>
+                <View style={[fabMenuStyles.icon, { backgroundColor: "#8b5cf6" + "22" }]}>
+                  <Feather name="users" size={18} color="#8b5cf6" />
+                </View>
+                <Text style={[fabMenuStyles.label, { color: c.foreground }]}>Buat Grup / Channel</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       )}
 
@@ -301,4 +323,17 @@ const styles = StyleSheet.create({
   retryBtn: { marginTop: 10, paddingHorizontal: 26, paddingVertical: 11, borderRadius: 10 },
   retryText: { color: "#fff", fontWeight: "600", fontFamily: "Inter_600SemiBold", fontSize: 14 },
   fab: { position: "absolute", right: 20 },
+});
+
+const fabMenuStyles = StyleSheet.create({
+  menu: {
+    position: "absolute", bottom: 66, right: 0,
+    borderRadius: 14, borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 8, minWidth: 200,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2, shadowRadius: 10, elevation: 10,
+  },
+  item: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  icon: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  label: { fontSize: 14, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
 });
