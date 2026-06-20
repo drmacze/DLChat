@@ -719,11 +719,30 @@ export default function SettingsScreen() {
             }
           />
           <SettingRow
+            icon="fingerprint"
+            label="Kunci Biometrik"
+            sublabel="Kunci aplikasi dengan sidik jari / Face ID"
+            iconColor="#8B5CF6"
+            onPress={() => Alert.alert("Kunci Biometrik", "Untuk mengaktifkan biometrik, aktifkan dulu PIN keamanan lalu gunakan fitur ini.", [
+              { text: "Mengerti" },
+            ])}
+          />
+          <SettingRow
             icon="shield"
             label="Active Sessions"
             sublabel="See where you're signed in"
             iconColor="#8B5CF6"
             onPress={() => setSessionsOpen(true)}
+          />
+        </Section>
+
+        <Section title="Berbagi Profil">
+          <SettingRow
+            icon="share-2"
+            label="QR Code Profil Saya"
+            sublabel="Bagikan profil via QR code"
+            iconColor={c.primary as string}
+            onPress={() => router.push("/qr-profile" as any)}
           />
         </Section>
 

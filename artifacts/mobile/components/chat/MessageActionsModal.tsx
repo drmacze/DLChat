@@ -1,7 +1,7 @@
 import React from "react";
 import {
   View, Text, Modal, TouchableOpacity, StyleSheet, Pressable,
-  ScrollView, Clipboard, Alert,
+  ScrollView, Alert,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTheme } from "@/context/ThemeContext";
@@ -15,6 +15,7 @@ interface Message {
   senderId: string;
   isPinned?: boolean;
   isStarred?: boolean;
+  editedAt?: string | null;
 }
 
 interface MessageActionsModalProps {
@@ -29,6 +30,7 @@ interface MessageActionsModalProps {
   onStar: () => void;
   onDelete: () => void;
   onCopy: () => void;
+  onEdit?: () => void;
   onTranslate?: () => void;
   onSave?: () => void;
 }
@@ -36,16 +38,19 @@ interface MessageActionsModalProps {
 export default function MessageActionsModal({
   visible, message, isMe,
   onClose, onReact, onReply, onForward, onPin, onStar, onDelete, onCopy,
-  onTranslate, onSave,
+  onEdit, onTranslate, onSave,
 }: MessageActionsModalProps) {
   const { c } = useTheme();
   if (!message) return null;
 
+  const canEdit = isMe && message.type === "text" && !!message.content && !message.editedAt;
+
   const actions = [
     { icon: "corner-up-left" as const, label: "Balas", onPress: onReply },
     { icon: "share-2" as const, label: "Teruskan", onPress: onForward },
+    ...(canEdit && onEdit ? [{ icon: "edit-2" as const, label: "Edit Pesan", onPress: onEdit }] : []),
     { icon: message?.isPinned ? "x-circle" as const : "map-pin" as const, label: message?.isPinned ? "Lepas Pin" : "Pin", onPress: onPin },
-    { icon: message?.isStarred ? "star" as const : "star" as const, label: message?.isStarred ? "Batal Bintang" : "Bintangi", onPress: onStar, starActive: message?.isStarred },
+    { icon: "star" as const, label: message?.isStarred ? "Batal Bintang" : "Bintangi", onPress: onStar, starActive: message?.isStarred },
     ...(message?.content ? [{ icon: "copy" as const, label: "Salin", onPress: onCopy }] : []),
     ...(message?.content && onTranslate ? [{ icon: "globe" as const, label: "Terjemahkan", onPress: onTranslate }] : []),
     ...(onSave ? [{ icon: "bookmark" as const, label: "Simpan", onPress: onSave }] : []),
@@ -79,7 +84,7 @@ export default function MessageActionsModal({
                 <Feather
                   name={action.icon}
                   size={20}
-                  color={action.danger ? c.danger : action.starActive ? "#FFD700" : c.foreground}
+                  color={action.danger ? c.danger : (action as any).starActive ? "#FFD700" : c.foreground}
                 />
                 <Text style={[styles.actionLabel, { color: action.danger ? c.danger : c.foreground }]}>
                   {action.label}
@@ -104,7 +109,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
     paddingBottom: 30,
-    maxHeight: "60%",
+    maxHeight: "65%",
   },
   emojiRow: {
     flexDirection: "row",

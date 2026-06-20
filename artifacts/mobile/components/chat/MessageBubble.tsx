@@ -58,6 +58,46 @@ function StatusIcon({ status, isMe }: { status?: string | null; isMe: boolean })
   return <Text style={[styles.statusTick, { color: "rgba(255,255,255,0.5)" }]}>✓</Text>;
 }
 
+function FileBubble({ uri, name, isMe, c }: { uri: string; name: string; isMe: boolean; c: Record<string, unknown> }) {
+  const iconColor = isMe ? "#fff" : (c.primary as string);
+  const textColor = isMe ? "rgba(255,255,255,0.9)" : (c.foreground as string);
+  const subColor = isMe ? "rgba(255,255,255,0.6)" : (c.mutedForeground as string);
+
+  const ext = uri.split(".").pop()?.toLowerCase() ?? "file";
+  const getIcon = () => {
+    if (["pdf"].includes(ext)) return "file-text";
+    if (["mp4", "mov", "avi"].includes(ext)) return "film";
+    if (["mp3", "m4a", "ogg", "wav"].includes(ext)) return "music";
+    if (["zip", "rar", "7z"].includes(ext)) return "archive";
+    if (["jpg", "jpeg", "png", "gif", "webp"].includes(ext)) return "image";
+    return "file";
+  };
+
+  const handleOpen = () => {
+    Alert.alert("Buka File", "Salin URL file untuk dibuka di browser?", [
+      { text: "Batal", style: "cancel" },
+      { text: "Salin URL", onPress: () => {
+        const { Clipboard } = require("react-native");
+        Clipboard.setString(uri);
+        Alert.alert("✅", "URL disalin ke clipboard.");
+      }},
+    ]);
+  };
+
+  return (
+    <TouchableOpacity style={styles.fileBubble} onPress={handleOpen} activeOpacity={0.7}>
+      <View style={[styles.fileIconWrap, { backgroundColor: isMe ? "rgba(255,255,255,0.15)" : (c.surface as string) }]}>
+        <Feather name={getIcon() as any} size={22} color={iconColor} />
+      </View>
+      <View style={styles.fileInfo}>
+        <Text style={[styles.fileName, { color: textColor }]} numberOfLines={1}>{name}</Text>
+        <Text style={[styles.fileExt, { color: subColor }]}>{ext.toUpperCase()} · Ketuk untuk buka</Text>
+      </View>
+      <Feather name="download" size={16} color={subColor} />
+    </TouchableOpacity>
+  );
+}
+
 function VoicePlayer({ uri, isMe, c }: { uri: string; isMe: boolean; c: Record<string, unknown> }) {
   const soundRef = React.useRef<Audio.Sound | null>(null);
   const [isPlaying, setIsPlaying] = React.useState(false);
@@ -223,15 +263,24 @@ export default function MessageBubble({
       ) : message.type === "video" && message.mediaUrl ? (
         <View style={[styles.mediaVideoPlaceholder, { backgroundColor: "#000" }]}>
           <Feather name="play-circle" size={40} color="#fff" />
+          <Text style={styles.videoLabel}>Tekan untuk putar</Text>
         </View>
       ) : isVoice ? (
         <VoicePlayer uri={message.mediaUrl!} isMe={isMe} c={c as Record<string, unknown>} />
+      ) : message.type === "file" && message.mediaUrl ? (
+        <FileBubble uri={message.mediaUrl} name={message.content ?? "File"} isMe={isMe} c={c as Record<string, unknown>} />
       ) : null}
       {message.content && !isDeleted ? (
         <FormattedText text={message.content} style={[styles.content, { color: textColor }]} />
       ) : null}
       {showLinkPreview && message.content && (
         <LinkPreview text={message.content} isMe={isMe} />
+      )}
+      {(message as any).isViewOnce && (message.type === "image" || message.type === "video") && !isDeleted && (
+        <View style={[styles.viewOnceBadge, { backgroundColor: isMe ? "rgba(0,0,0,0.3)" : (c.surface as string) }]}>
+          <Feather name="eye" size={11} color={isMe ? "#fff" : c.primary as string} />
+          <Text style={[styles.viewOnceText, { color: isMe ? "#fff" : c.primary as string }]}>Lihat sekali</Text>
+        </View>
       )}
       {!isDeleted && (
         <View style={styles.meta}>
@@ -366,7 +415,15 @@ const styles = StyleSheet.create({
   replyName: { fontSize: 12, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
   replyContent: { fontSize: 12, fontFamily: "Inter_400Regular" },
   mediaImage: { width: 220, height: 160, borderRadius: 10, marginBottom: 4 },
-  mediaVideoPlaceholder: { width: 220, height: 160, borderRadius: 10, marginBottom: 4, alignItems: "center", justifyContent: "center" },
+  mediaVideoPlaceholder: { width: 220, height: 160, borderRadius: 10, marginBottom: 4, alignItems: "center", justifyContent: "center", gap: 8 },
+  videoLabel: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontFamily: "Inter_400Regular" },
+  viewOnceBadge: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, alignSelf: "flex-start", marginBottom: 4 },
+  viewOnceText: { fontSize: 11, fontFamily: "Inter_500Medium" },
+  fileBubble: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 4, minWidth: 200, maxWidth: 260 },
+  fileIconWrap: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center" },
+  fileInfo: { flex: 1 },
+  fileName: { fontSize: 13, fontFamily: "Inter_500Medium", marginBottom: 2 },
+  fileExt: { fontSize: 11, fontFamily: "Inter_400Regular" },
   voicePlayer: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4, minWidth: 180, maxWidth: 240 },
   voicePlayBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   voiceWaveContainer: { flex: 1, gap: 3 },

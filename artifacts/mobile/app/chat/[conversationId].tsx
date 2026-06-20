@@ -87,6 +87,8 @@ export default function ChatRoomScreen() {
   const [selectedMessage, setSelectedMessage] = useState<MessageItem | null>(null);
   const [showActionsModal, setShowActionsModal] = useState(false);
   const [showForwardModal, setShowForwardModal] = useState(false);
+  const [editingMessage, setEditingMessage] = useState<MessageItem | null>(null);
+  const [editText, setEditText] = useState("");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
@@ -228,8 +230,24 @@ export default function ChatRoomScreen() {
     finally { setIsLoadingMore(false); }
   }, [hasMore, isLoadingMore, conversationId]);
 
-  const handleSend = useCallback((text: string, mediaUrl?: string, type?: string) => {
+  const handleSend = useCallback(async (text: string, mediaUrl?: string, type?: string, extra?: { scheduleAt?: string; isViewOnce?: boolean }) => {
     if (!conversationId || !user) return;
+
+    // Handle scheduled message
+    if (extra?.scheduleAt) {
+      try {
+        const token = await getToken();
+        await fetch(`${BASE_URL}/api/messages/schedule`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ conversationId, content: text, sendAt: extra.scheduleAt }),
+        });
+        Alert.alert("✅ Dijadwalkan", `Pesan akan dikirim pada ${new Date(extra.scheduleAt).toLocaleString("id-ID")}`);
+      } catch {
+        Alert.alert("Error", "Gagal menjadwalkan pesan.");
+      }
+      return;
+    }
 
     const tempId = `temp-${Date.now()}-${Math.random()}`;
     const optimisticMsg: MessageItem = {
@@ -288,6 +306,35 @@ export default function ChatRoomScreen() {
       }
     );
   }, [conversationId, replyingTo, streakData, user]);
+
+  const handleEditMessage = useCallback(async () => {
+    if (!editingMessage || !editText.trim()) return;
+    try {
+      const token = await getToken();
+      const res = await fetch(`${BASE_URL}/api/messages/${editingMessage.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ content: editText.trim() }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const updated = await res.json();
+      setLocalMessages((prev) => prev.map((m) =>
+        m.id === editingMessage.id ? { ...m, content: updated.content, editedAt: updated.editedAt } : m
+      ));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      Alert.alert("Error", "Gagal mengedit pesan.");
+    } finally {
+      setEditingMessage(null);
+      setEditText("");
+    }
+  }, [editingMessage, editText]);
+
+  const startEditMessage = useCallback((msg: MessageItem) => {
+    setEditingMessage(msg);
+    setEditText(msg.content ?? "");
+    setShowActionsModal(false);
+  }, []);
 
   const handleReact = useCallback(async (emoji: string) => {
     if (!selectedMessage) return;
@@ -438,15 +485,99 @@ export default function ChatRoomScreen() {
     ]);
   }, [conversationId]);
 
+  const handleGroupInviteLink = useCallback(async () => {
+    try {
+      const t = await getToken();
+      const res = await fetch(`${BASE_URL}/api/conversations/${conversationId}/invite-link`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${t}` },
+      });
+      if (!res.ok) throw new Error("Gagal membuat link");
+      const { inviteCode, inviteLink } = await res.json();
+      Alert.alert(
+        "🔗 Link Undangan Grup",
+        `Bagikan link ini untuk mengundang anggota baru:\n\ndlchat://invite/${inviteCode}`,
+        [
+          { text: "Batal", style: "cancel" },
+          { text: "Salin Link", onPress: () => {
+            Clipboard.setString(inviteLink);
+            Alert.alert("✅", "Link undangan disalin!");
+          }},
+          { text: "Bagikan", onPress: async () => {
+            const { Share } = require("react-native");
+            await Share.share({ message: `Bergabung dengan grup kami di DLChat: dlchat://invite/${inviteCode}` });
+          }},
+        ]
+      );
+    } catch { Alert.alert("Error", "Tidak dapat membuat link undangan."); }
+  }, [conversationId]);
+
+  const handleDisappearingMessages = useCallback(() => {
+    Alert.alert("Pesan Menghilang", "Pesan otomatis terhapus setelah:", [
+      { text: "Nonaktifkan", onPress: async () => {
+        try {
+          const t = await getToken();
+          await fetch(`${BASE_URL}/api/conversations/${conversationId}/disappear`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${t}` },
+            body: JSON.stringify({ timer: 0 }),
+          });
+          Alert.alert("✅", "Pesan menghilang dinonaktifkan.");
+        } catch { Alert.alert("Error", "Gagal mengubah pengaturan."); }
+      }},
+      { text: "24 jam", onPress: async () => {
+        try {
+          const t = await getToken();
+          await fetch(`${BASE_URL}/api/conversations/${conversationId}/disappear`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${t}` },
+            body: JSON.stringify({ timer: 86400 }),
+          });
+          Alert.alert("✅", "Pesan akan terhapus setelah 24 jam.");
+        } catch { Alert.alert("Error", "Gagal mengubah pengaturan."); }
+      }},
+      { text: "7 hari", onPress: async () => {
+        try {
+          const t = await getToken();
+          await fetch(`${BASE_URL}/api/conversations/${conversationId}/disappear`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${t}` },
+            body: JSON.stringify({ timer: 604800 }),
+          });
+          Alert.alert("✅", "Pesan akan terhapus setelah 7 hari.");
+        } catch { Alert.alert("Error", "Gagal mengubah pengaturan."); }
+      }},
+      { text: "30 hari", onPress: async () => {
+        try {
+          const t = await getToken();
+          await fetch(`${BASE_URL}/api/conversations/${conversationId}/disappear`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${t}` },
+            body: JSON.stringify({ timer: 2592000 }),
+          });
+          Alert.alert("✅", "Pesan akan terhapus setelah 30 hari.");
+        } catch { Alert.alert("Error", "Gagal mengubah pengaturan."); }
+      }},
+      { text: "Batal", style: "cancel" },
+    ]);
+  }, [conversationId]);
+
   const showMoreOptions = useCallback(() => {
+    const convType = (convData as any)?.type;
+    const isGroupChat = convType === "group" || convType === "channel";
+    const groupOptions = isGroupChat ? [
+      { text: "🔗 Link Undangan Grup", onPress: handleGroupInviteLink },
+    ] : [];
     Alert.alert("Opsi Chat", undefined, [
       { text: "Pilih Pesan", onPress: () => setIsSelectMode(true) },
+      ...groupOptions,
+      { text: "⏱ Pesan Menghilang", onPress: handleDisappearingMessages },
       { text: "Bisukan Notifikasi", onPress: handleMuteFn },
       { text: "Arsipkan Chat", onPress: handleArchiveFn },
       { text: "Hapus Riwayat Chat", style: "destructive", onPress: handleClearHistoryFn },
       { text: "Batal", style: "cancel" },
     ]);
-  }, [handleMuteFn, handleArchiveFn, handleClearHistoryFn]);
+  }, [handleMuteFn, handleArchiveFn, handleClearHistoryFn, handleDisappearingMessages, handleGroupInviteLink, convData]);
 
   const handleLongPress = useCallback((msg: MessageItem) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -471,6 +602,7 @@ export default function ChatRoomScreen() {
   }, [conversationId, convData, user?.id]);
 
   const conv = convData;
+  const isGroup = conv?.type === "group" || conv?.type === "channel";
   const isAI = (conv as any)?.isAI === true;
   const otherMember = conv?.type === "direct"
     ? conv.members.find((m: { userId: string }) => m.userId !== user?.id)
@@ -565,6 +697,9 @@ export default function ChatRoomScreen() {
                   </TouchableOpacity>
                 </>
               )}
+              <TouchableOpacity style={styles.headerBtn} onPress={() => router.push({ pathname: "/chat/media-gallery", params: { conversationId, title: displayName } } as any)}>
+                <Feather name="image" size={20} color={c.foreground} />
+              </TouchableOpacity>
               <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/starred-messages" as any)}>
                 <Feather name="star" size={20} color={c.foreground} />
               </TouchableOpacity>
@@ -691,17 +826,45 @@ export default function ChatRoomScreen() {
                 </TouchableOpacity>
               </View>
             )}
-            <MessageInput
-              onSend={handleSend}
-              onTyping={() => sendTyping(conversationId!)}
-              onStopTyping={() => stopTyping(conversationId!)}
-              conversationId={conversationId}
-              members={(conv?.members ?? []).map((m: any) => ({
-                id: m.userId,
-                displayName: m.user?.displayName ?? "User",
-                avatarUrl: m.user?.avatarUrl ?? null,
-              }))}
-            />
+            {editingMessage ? (
+              <View style={[styles.editBar, { backgroundColor: c.surface, borderTopColor: c.border }]}>
+                <View style={[styles.editBarLine, { backgroundColor: c.primary }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.editBarLabel, { color: c.primary }]}>Edit Pesan</Text>
+                  <TextInput
+                    style={[styles.editBarInput, { color: c.foreground }]}
+                    value={editText}
+                    onChangeText={setEditText}
+                    multiline
+                    maxLength={4000}
+                    autoFocus
+                    placeholderTextColor={c.mutedForeground}
+                  />
+                </View>
+                <TouchableOpacity onPress={() => { setEditingMessage(null); setEditText(""); }} style={styles.editBarClose}>
+                  <Feather name="x" size={18} color={c.mutedForeground} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleEditMessage}
+                  style={[styles.editBarSend, { backgroundColor: editText.trim() ? c.primary : c.surface }]}
+                  disabled={!editText.trim()}
+                >
+                  <Feather name="check" size={18} color={editText.trim() ? "#fff" : c.mutedForeground} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <MessageInput
+                onSend={handleSend}
+                onTyping={() => sendTyping(conversationId!)}
+                onStopTyping={() => stopTyping(conversationId!)}
+                conversationId={conversationId}
+                members={(conv?.members ?? []).map((m: any) => ({
+                  id: m.userId,
+                  displayName: m.user?.displayName ?? "User",
+                  avatarUrl: m.user?.avatarUrl ?? null,
+                }))}
+              />
+            )}
           </>
         )}
       </KeyboardAvoidingView>
@@ -719,6 +882,7 @@ export default function ChatRoomScreen() {
         onStar={handleStar}
         onDelete={() => selectedMessage && handleDeleteMessage(selectedMessage.id)}
         onCopy={handleCopy}
+        onEdit={selectedMessage ? () => startEditMessage(selectedMessage) : undefined}
       />
 
       {/* Forward Modal */}
@@ -784,4 +948,13 @@ const styles = StyleSheet.create({
   selectToolbarBtn: { flexDirection: "row", alignItems: "center", gap: 6 },
   selectToolbarText: { fontSize: 14, fontFamily: "Inter_500Medium" },
   selectCount: { fontSize: 16, fontFamily: "Inter_700Bold" },
+  editBar: {
+    flexDirection: "row", alignItems: "center", paddingHorizontal: 12,
+    paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, gap: 10,
+  },
+  editBarLine: { width: 3, alignSelf: "stretch", borderRadius: 2 },
+  editBarLabel: { fontSize: 12, fontWeight: "600", fontFamily: "Inter_600SemiBold", marginBottom: 2 },
+  editBarInput: { fontSize: 15, fontFamily: "Inter_400Regular", maxHeight: 80 },
+  editBarClose: { padding: 4 },
+  editBarSend: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
 });

@@ -428,6 +428,17 @@ async function runMigrations() {
 
       -- Feature pack: message_status last_read
       ALTER TABLE conversation_members ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMPTZ;
+
+      -- Feature pack: view once messages
+      CREATE TABLE IF NOT EXISTS view_once_views (
+        message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        viewer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        viewed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (message_id, viewer_id)
+      );
+
+      -- Feature pack: view once flag on messages
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_view_once BOOLEAN NOT NULL DEFAULT false;
     `);
     logger.info("Database schema initialized");
   } catch (err) {

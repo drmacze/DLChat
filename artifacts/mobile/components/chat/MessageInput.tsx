@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View, TextInput, TouchableOpacity, StyleSheet,
-  Platform, Alert, Text, Animated, FlatList,
+  Platform, Alert, Text, Animated, FlatList, Modal, Pressable,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
+import * as DocumentPicker from "expo-document-picker";
 import { Audio } from "expo-av";
 import { useTheme } from "@/context/ThemeContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -21,7 +22,7 @@ interface MentionMember {
 }
 
 interface MessageInputProps {
-  onSend: (text: string, mediaUrl?: string, type?: string) => void;
+  onSend: (text: string, mediaUrl?: string, type?: string, extra?: { scheduleAt?: string; isViewOnce?: boolean }) => void;
   onTyping?: () => void;
   onStopTyping?: () => void;
   placeholder?: string;
@@ -45,7 +46,7 @@ async function compressImage(uri: string): Promise<string> {
 
 async function uploadMedia(uri: string, mimeType: string): Promise<string> {
   const token = await AsyncStorage.getItem("auth_token");
-  const folder = mimeType.startsWith("audio") ? "voice" : "message-media";
+  const folder = mimeType.startsWith("audio") ? "voice" : mimeType.startsWith("application") ? "files" : "message-media";
   const formData = new FormData();
   const filename = uri.split("/").pop() ?? "media";
   (formData as any).append("file", { uri, name: filename, type: mimeType });
@@ -67,6 +68,83 @@ function getDraftKey(conversationId?: string) {
   return conversationId ? `draft:${conversationId}` : null;
 }
 
+function ScheduleModal({
+  visible,
+  onClose,
+  onSchedule,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSchedule: (iso: string) => void;
+}) {
+  const { c } = useTheme();
+  const [selectedOption, setSelectedOption] = useState<number | null>(null);
+
+  const options = [
+    { label: "5 menit lagi", minutes: 5 },
+    { label: "30 menit lagi", minutes: 30 },
+    { label: "1 jam lagi", minutes: 60 },
+    { label: "3 jam lagi", minutes: 180 },
+    { label: "Besok pagi (08:00)", minutes: null, customFn: () => {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      d.setHours(8, 0, 0, 0);
+      return d.toISOString();
+    }},
+    { label: "Besok siang (12:00)", minutes: null, customFn: () => {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      d.setHours(12, 0, 0, 0);
+      return d.toISOString();
+    }},
+    { label: "Besok malam (20:00)", minutes: null, customFn: () => {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      d.setHours(20, 0, 0, 0);
+      return d.toISOString();
+    }},
+  ];
+
+  const handleSelect = (idx: number) => {
+    const opt = options[idx];
+    let iso: string;
+    if (opt.customFn) {
+      iso = opt.customFn();
+    } else {
+      const d = new Date(Date.now() + (opt.minutes! * 60 * 1000));
+      iso = d.toISOString();
+    }
+    onSchedule(iso);
+    onClose();
+    setSelectedOption(null);
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={modalStyles.overlay} onPress={onClose}>
+        <Pressable style={[modalStyles.container, { backgroundColor: c.surface as string, borderColor: c.border as string }]}>
+          <Text style={[modalStyles.title, { color: c.foreground as string }]}>Jadwalkan Pesan</Text>
+          <Text style={[modalStyles.subtitle, { color: c.mutedForeground as string }]}>Pilih waktu pengiriman:</Text>
+          {options.map((opt, idx) => (
+            <TouchableOpacity
+              key={idx}
+              style={[modalStyles.option, { borderColor: c.border as string, backgroundColor: selectedOption === idx ? (c.primary as string) + "22" : "transparent" }]}
+              onPress={() => handleSelect(idx)}
+              activeOpacity={0.7}
+            >
+              <Feather name="clock" size={16} color={c.primary as string} />
+              <Text style={[modalStyles.optionText, { color: c.foreground as string }]}>{opt.label}</Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity style={[modalStyles.cancelBtn, { borderColor: c.border as string }]} onPress={onClose}>
+            <Text style={[modalStyles.cancelText, { color: c.mutedForeground as string }]}>Batal</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 export default function MessageInput({
   onSend, onTyping, onStopTyping,
   placeholder = "Pesan...",
@@ -82,12 +160,17 @@ export default function MessageInput({
   const [recordingSecs, setRecordingSecs] = useState(0);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [showPollModal, setShowPollModal] = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [isViewOnce, setIsViewOnce] = useState(false);
   const [mentionSuggestions, setMentionSuggestions] = useState<MentionMember[]>([]);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inputRef = useRef<TextInput>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isHoldRecording = useRef(false);
 
   const recordingRef = React.useRef<Audio.Recording | null>(null);
 
@@ -168,20 +251,26 @@ export default function MessageInput({
     inputRef.current?.focus();
   };
 
-  const handleSend = () => {
+  const handleSend = (scheduleAt?: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onSend(trimmed);
+    onSend(trimmed, undefined, "text", scheduleAt ? { scheduleAt } : undefined);
     setText("");
     clearDraft();
     onStopTyping?.();
     if (typingTimer.current) clearTimeout(typingTimer.current);
     setMentionQuery(null);
     setMentionSuggestions([]);
+    setIsViewOnce(false);
+  };
+
+  const handleScheduleSend = (iso: string) => {
+    handleSend(iso);
   };
 
   const handlePickImage = async () => {
+    setShowAttachMenu(false);
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert("Izin diperlukan", "Izinkan akses galeri foto.");
@@ -191,6 +280,7 @@ export default function MessageInput({
       mediaTypes: ["images", "videos"],
       quality: 1,
       allowsEditing: false,
+      allowsMultipleSelection: false,
     });
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
@@ -206,7 +296,8 @@ export default function MessageInput({
         uri = await compressImage(uri);
       }
       const url = await uploadMedia(uri, mimeType);
-      onSend("", url, msgType);
+      onSend("", url, msgType, isViewOnce ? { isViewOnce: true } : undefined);
+      setIsViewOnce(false);
     } catch {
       Alert.alert("Upload gagal", "Tidak dapat mengunggah media.");
     } finally {
@@ -215,6 +306,7 @@ export default function MessageInput({
   };
 
   const handleCamera = async () => {
+    setShowAttachMenu(false);
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       Alert.alert("Izin diperlukan", "Izinkan akses kamera.");
@@ -231,9 +323,30 @@ export default function MessageInput({
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       const uri = await compressImage(asset.uri);
       const url = await uploadMedia(uri, "image/jpeg");
-      onSend("", url, "image");
+      onSend("", url, "image", isViewOnce ? { isViewOnce: true } : undefined);
+      setIsViewOnce(false);
     } catch {
       Alert.alert("Upload gagal", "Tidak dapat mengunggah foto.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handlePickDocument = async () => {
+    setShowAttachMenu(false);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      setIsUploading(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const url = await uploadMedia(asset.uri, asset.mimeType ?? "application/octet-stream");
+      onSend(asset.name ?? "File", url, "file");
+    } catch {
+      Alert.alert("Upload gagal", "Tidak dapat mengunggah file.");
     } finally {
       setIsUploading(false);
     }
@@ -311,7 +424,7 @@ export default function MessageInput({
           </TouchableOpacity>
           <Animated.View style={[styles.recordingDot, { backgroundColor: c.danger as string, transform: [{ scale: pulseAnim }] }]} />
           <Text style={[styles.recordingTimer, { color: c.foreground as string }]}>{formatDuration(recordingSecs)}</Text>
-          <Text style={[styles.recordingLabel, { color: c.mutedForeground as string }]}>Merekam...</Text>
+          <Text style={[styles.recordingLabel, { color: c.mutedForeground as string }]}>Merekam... geser ke kiri untuk batal</Text>
           <TouchableOpacity
             onPress={stopRecordingAndSend}
             style={[styles.sendRecordingBtn, { backgroundColor: c.primary as string }]}
@@ -352,36 +465,80 @@ export default function MessageInput({
           onCreated={(_pollId: string) => { setShowPollModal(false); }}
         />
       )}
+
+      <ScheduleModal
+        visible={showScheduleModal}
+        onClose={() => setShowScheduleModal(false)}
+        onSchedule={handleScheduleSend}
+      />
+
+      {/* Attach menu popup */}
+      {showAttachMenu && (
+        <View style={[styles.attachMenu, { backgroundColor: c.surface as string, borderColor: c.border as string }]}>
+          <TouchableOpacity style={styles.attachMenuItem} onPress={handleCamera} activeOpacity={0.7}>
+            <View style={[styles.attachMenuIcon, { backgroundColor: "#2196F3" }]}>
+              <Feather name="camera" size={18} color="#fff" />
+            </View>
+            <Text style={[styles.attachMenuLabel, { color: c.foreground as string }]}>Kamera</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.attachMenuItem} onPress={handlePickImage} activeOpacity={0.7}>
+            <View style={[styles.attachMenuIcon, { backgroundColor: "#9C27B0" }]}>
+              <Feather name="image" size={18} color="#fff" />
+            </View>
+            <Text style={[styles.attachMenuLabel, { color: c.foreground as string }]}>Galeri</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.attachMenuItem} onPress={handlePickDocument} activeOpacity={0.7}>
+            <View style={[styles.attachMenuIcon, { backgroundColor: "#FF9800" }]}>
+              <Feather name="file" size={18} color="#fff" />
+            </View>
+            <Text style={[styles.attachMenuLabel, { color: c.foreground as string }]}>File</Text>
+          </TouchableOpacity>
+          {conversationId && (
+            <TouchableOpacity style={styles.attachMenuItem} onPress={() => { setShowAttachMenu(false); setShowPollModal(true); }} activeOpacity={0.7}>
+              <View style={[styles.attachMenuIcon, { backgroundColor: "#4CAF50" }]}>
+                <Feather name="bar-chart-2" size={18} color="#fff" />
+              </View>
+              <Text style={[styles.attachMenuLabel, { color: c.foreground as string }]}>Polling</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={styles.attachMenuItem}
+            onPress={() => { setShowAttachMenu(false); setIsViewOnce(!isViewOnce); }}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.attachMenuIcon, { backgroundColor: isViewOnce ? (c.danger as string) : "#607D8B" }]}>
+              <Feather name="eye-off" size={18} color="#fff" />
+            </View>
+            <Text style={[styles.attachMenuLabel, { color: c.foreground as string }]}>
+              {isViewOnce ? "View Once: ON" : "View Once"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={styles.container}>
+        {isViewOnce && (
+          <View style={[styles.viewOnceBadge, { backgroundColor: (c.danger as string) + "22", borderColor: c.danger as string }]}>
+            <Feather name="eye-off" size={12} color={c.danger as string} />
+            <Text style={[styles.viewOnceText, { color: c.danger as string }]}>View Once aktif — media hanya bisa dilihat sekali</Text>
+            <TouchableOpacity onPress={() => setIsViewOnce(false)}>
+              <Feather name="x" size={14} color={c.danger as string} />
+            </TouchableOpacity>
+          </View>
+        )}
         <View style={[styles.inputRow, { backgroundColor: c.surface as string }]}>
           <TouchableOpacity
             style={styles.attachBtn}
-            onPress={handleCamera}
+            onPress={() => setShowAttachMenu((v) => !v)}
             disabled={isUploading}
             activeOpacity={0.7}
           >
-            <Feather name="camera" size={20} color={isUploading ? c.primary as string : c.mutedForeground as string} />
+            <Feather
+              name={showAttachMenu ? "x" : "plus"}
+              size={20}
+              color={showAttachMenu ? (c.primary as string) : isUploading ? c.primary as string : c.mutedForeground as string}
+            />
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.attachBtn}
-            onPress={handlePickImage}
-            disabled={isUploading}
-            activeOpacity={0.7}
-          >
-            <Feather name={isUploading ? "loader" : "image"} size={20} color={isUploading ? c.primary as string : c.mutedForeground as string} />
-          </TouchableOpacity>
-
-          {conversationId && (
-            <TouchableOpacity
-              style={styles.attachBtn}
-              onPress={() => setShowPollModal(true)}
-              disabled={isUploading}
-              activeOpacity={0.7}
-            >
-              <Feather name="bar-chart-2" size={20} color={c.mutedForeground as string} />
-            </TouchableOpacity>
-          )}
 
           <TextInput
             ref={inputRef}
@@ -392,14 +549,25 @@ export default function MessageInput({
             onChangeText={handleChangeText}
             multiline
             maxLength={4000}
-            onSubmitEditing={Platform.OS === "web" ? handleSend : undefined}
+            onSubmitEditing={Platform.OS === "web" ? () => handleSend() : undefined}
             blurOnSubmit={false}
           />
 
           {text.trim() ? (
             <TouchableOpacity
+              style={[styles.scheduleBtn]}
+              onPress={() => setShowScheduleModal(true)}
+              activeOpacity={0.7}
+              disabled={!canSend}
+            >
+              <Feather name="clock" size={16} color={canSend ? c.mutedForeground as string : "transparent"} />
+            </TouchableOpacity>
+          ) : null}
+
+          {text.trim() ? (
+            <TouchableOpacity
               style={[styles.sendBtn, { backgroundColor: canSend ? c.primary as string : "transparent" }]}
-              onPress={handleSend}
+              onPress={() => handleSend()}
               activeOpacity={0.7}
               disabled={!canSend}
             >
@@ -421,6 +589,26 @@ export default function MessageInput({
   );
 }
 
+const modalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "center", alignItems: "center", padding: 24,
+  },
+  container: {
+    width: "100%", borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden",
+  },
+  title: { fontSize: 17, fontFamily: "Inter_700Bold", textAlign: "center", paddingTop: 20, paddingHorizontal: 20 },
+  subtitle: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", paddingBottom: 12, paddingHorizontal: 20 },
+  option: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  optionText: { fontSize: 15, fontFamily: "Inter_400Regular" },
+  cancelBtn: {
+    alignItems: "center", paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  cancelText: { fontSize: 15, fontFamily: "Inter_500Medium" },
+});
+
 const styles = StyleSheet.create({
   outerContainer: { borderTopWidth: StyleSheet.hairlineWidth },
   container: { paddingHorizontal: 12, paddingTop: 8 },
@@ -430,15 +618,16 @@ const styles = StyleSheet.create({
   },
   attachBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", marginRight: 2 },
   input: { flex: 1, fontSize: 15, fontFamily: "Inter_400Regular", maxHeight: 120, paddingTop: 4, paddingBottom: 4 },
-  sendBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", marginLeft: 6 },
+  scheduleBtn: { width: 28, height: 36, alignItems: "center", justifyContent: "center", marginLeft: 2 },
+  sendBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", marginLeft: 4 },
   recordingRow: {
     flexDirection: "row", alignItems: "center", borderRadius: 24,
-    paddingHorizontal: 12, paddingVertical: 8, minHeight: 44, gap: 10,
+    paddingHorizontal: 12, paddingVertical: 8, minHeight: 44, gap: 8,
   },
   cancelRecording: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
   recordingDot: { width: 10, height: 10, borderRadius: 5 },
   recordingTimer: { fontSize: 15, fontFamily: "Inter_700Bold", minWidth: 40 },
-  recordingLabel: { flex: 1, fontSize: 13, fontFamily: "Inter_400Regular" },
+  recordingLabel: { flex: 1, fontSize: 11, fontFamily: "Inter_400Regular" },
   sendRecordingBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   mentionList: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -458,4 +647,17 @@ const styles = StyleSheet.create({
   mentionAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   mentionAvatarText: { color: "#fff", fontSize: 14, fontWeight: "700" },
   mentionName: { fontSize: 15, fontFamily: "Inter_500Medium" },
+  attachMenu: {
+    flexDirection: "row", flexWrap: "wrap", gap: 8,
+    marginHorizontal: 12, marginBottom: 8, padding: 12,
+    borderRadius: 16, borderWidth: StyleSheet.hairlineWidth,
+  },
+  attachMenuItem: { alignItems: "center", gap: 6, width: 60 },
+  attachMenuIcon: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  attachMenuLabel: { fontSize: 10, fontFamily: "Inter_400Regular", textAlign: "center" },
+  viewOnceBadge: {
+    flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6,
+    borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, marginBottom: 6,
+  },
+  viewOnceText: { flex: 1, fontSize: 11, fontFamily: "Inter_400Regular" },
 });

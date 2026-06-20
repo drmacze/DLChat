@@ -12,13 +12,27 @@ const upload = multer({
   limits: { fileSize: MAX_SIZE_MB * 1024 * 1024 },
   fileFilter: (_, file, cb) => {
     const allowed = [
-      "image/jpeg", "image/png", "image/gif", "image/webp",
-      "video/mp4", "video/quicktime",
-      "audio/mpeg", "audio/ogg", "audio/webm",
+      "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml",
+      "video/mp4", "video/quicktime", "video/x-matroska", "video/avi",
+      "audio/mpeg", "audio/ogg", "audio/webm", "audio/wav", "audio/aac", "audio/x-m4a",
       "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-powerpoint",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/zip", "application/x-zip-compressed",
+      "application/x-rar-compressed",
+      "text/plain", "text/csv",
+      "application/json",
+      "application/octet-stream",
     ];
-    if (allowed.includes(file.mimetype)) cb(null, true);
-    else cb(new Error(`Unsupported file type: ${file.mimetype}`));
+    if (allowed.includes(file.mimetype) || file.mimetype.startsWith("audio/") || file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Unsupported file type: ${file.mimetype}`));
+    }
   },
 });
 
@@ -61,6 +75,10 @@ router.post("/story-media", requireAuth, upload.single("file"), (req: Request, r
 
 router.post("/voice", requireAuth, upload.single("file"), (req: Request, res: Response) =>
   handleUploadRoute(req as AuthRequest, res, "voice")
+);
+
+router.post("/files", requireAuth, upload.single("file"), (req: Request, res: Response) =>
+  handleUploadRoute(req as AuthRequest, res, "files")
 );
 
 export default router;

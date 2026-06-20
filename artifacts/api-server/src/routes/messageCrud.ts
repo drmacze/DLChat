@@ -286,6 +286,43 @@ router.delete("/:messageId/reactions", requireAuth, async (req: AuthRequest, res
   }
 });
 
+// POST /api/messages/:messageId/view-once — mark view-once media as viewed
+router.post("/:messageId/view-once", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const msgId = String(req.params.messageId);
+    const [msg] = await db.select().from(messages).where(eq(messages.id, msgId)).limit(1);
+    if (!msg) { res.status(404).json({ error: "Message not found" }); return; }
+    if (!await isMember(msg.conversationId, req.userId!)) { res.status(403).json({ error: "Not a member" }); return; }
+
+    // Check if already viewed by this user
+    const viewed = await db.execute(sql`
+      SELECT 1 FROM view_once_views WHERE message_id = ${msgId} AND viewer_id = ${req.userId}
+    `);
+    if (viewed.rows.length > 0) {
+      res.status(409).json({ error: "Already viewed", alreadyViewed: true }); return;
+    }
+
+    // Record view
+    await db.execute(sql`
+      INSERT INTO view_once_views (message_id, viewer_id) VALUES (${msgId}, ${req.userId})
+      ON CONFLICT DO NOTHING
+    `);
+
+    // If viewer is not sender, soft-delete the media (mark as viewed)
+    if (msg.senderId !== req.userId) {
+      await db.update(messages)
+        .set({ deletedAt: new Date() })
+        .where(eq(messages.id, msgId));
+      broadcastMessageDeleted(msg.conversationId, msgId);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, "View once error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // GET /api/messages/search?q=&conversationId=&type=&limit=
 router.get("/search", requireAuth, async (req: AuthRequest, res) => {
   try {
@@ -334,6 +371,44 @@ router.get("/search", requireAuth, async (req: AuthRequest, res) => {
   } catch (err) {
     logger.error({ err }, "Message search error");
     res.status(500).json({ error: "Search failed" });
+  }
+});
+
+// GET /api/messages/media/:conversationId — get all media (images/videos/files) in a conversation
+router.get("/media/:conversationId", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const ok = await isMember(String(req.params.conversationId), req.userId!);
+    if (!ok) { res.status(403).json({ error: "Not a member" }); return; }
+
+    const { type, before, limit } = req.query as Record<string, string>;
+    const rows = await db.execute(sql`
+      SELECT
+        m.id, m.type, m.media_url as "mediaUrl", m.content, m.created_at as "createdAt",
+        u.id as "senderId", u.display_name as "senderName", u.avatar_url as "senderAvatar"
+      FROM messages m
+      JOIN users u ON u.id = m.sender_id
+      WHERE m.conversation_id = ${req.params.conversationId}::uuid
+        AND m.deleted_at IS NULL
+        AND m.media_url IS NOT NULL
+        ${type ? sql`AND m.type = ${type}` : sql`AND m.type IN ('image', 'video', 'file', 'voice')`}
+        ${before ? sql`AND m.created_at < ${before}::timestamptz` : sql``}
+      ORDER BY m.created_at DESC
+      LIMIT ${Math.min(parseInt(limit ?? "60") || 60, 200)}
+    `);
+
+    res.json({
+      media: rows.rows.map((r: any) => ({
+        id: r.id,
+        type: r.type,
+        mediaUrl: r.mediaUrl,
+        content: r.content,
+        createdAt: r.createdAt,
+        sender: { id: r.senderId, displayName: r.senderName, avatarUrl: r.senderAvatar },
+      })),
+    });
+  } catch (err) {
+    logger.error({ err }, "Media gallery fetch error");
+    res.status(500).json({ error: "Server error" });
   }
 });
 

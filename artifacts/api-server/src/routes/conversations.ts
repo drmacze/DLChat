@@ -589,6 +589,30 @@ router.patch("/:conversationId/slow-mode", requireAuth, async (req: AuthRequest,
   }
 });
 
+// POST /:conversationId/disappear — set disappearing messages timer
+router.post("/:conversationId/disappear", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const member = await getMembership(String(req.params.conversationId), req.userId!);
+    if (!member) { res.status(403).json({ error: "Not a member" }); return; }
+
+    const { timer } = z.object({ timer: z.number().int().min(0) }).parse(req.body);
+
+    await db.execute(sql`
+      UPDATE conversations SET disappear_timer = ${timer} WHERE id = ${req.params.conversationId}
+    `);
+
+    const io = getIO();
+    if (io) io.to(`conv:${req.params.conversationId}`).emit("conversation:disappear_timer", {
+      conversationId: req.params.conversationId, timer,
+    });
+
+    res.json({ ok: true, timer });
+  } catch (err) {
+    logger.error({ err }, "Set disappear timer error");
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // POST /:conversationId/invite-link — generate group invite link
 router.post("/:conversationId/invite-link", requireAuth, async (req: AuthRequest, res) => {
   try {
